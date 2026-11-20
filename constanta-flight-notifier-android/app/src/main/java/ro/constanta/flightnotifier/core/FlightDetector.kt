@@ -235,13 +235,16 @@ class FlightDetector {
             if (seenHex.contains(hex)) continue
             val missingMs = nowMs - track.lastSeenMs
 
+             val latest = track.latest
+            val lastAlt = latest.altAglFt
+            val lastVr = latest.verticalRateFpm
             if (
                 track.approachingAirport &&
                 missingMs >= AirportConfig.SIGNAL_LOSS_TIMEOUT_MS &&
-                track.latest.distKm <= AirportConfig.TOUCHDOWN_LOSS_DIST_KM &&
-                track.latest.altAglFt != null &&
-                track.latest.altAglFt <= AirportConfig.TOUCHDOWN_LOSS_ALT_AGL_FT &&
-                (track.latest.verticalRateFpm == null || track.latest.verticalRateFpm <= 150)
+                latest.distKm <= AirportConfig.TOUCHDOWN_LOSS_DIST_KM &&
+                lastAlt != null &&
+                lastAlt <= AirportConfig.TOUCHDOWN_LOSS_ALT_AGL_FT &&
+                (lastVr == null || lastVr <= 150)
             ) {
                 emitEvent(FlightEventType.LANDING, track, nowMs, "final_signal_loss")?.let {
                     track.phase = "landed"
