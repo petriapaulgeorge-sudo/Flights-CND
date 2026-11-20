@@ -66,6 +66,13 @@ data class FlightEvent(
         get() = "https://globe.adsbexchange.com/?icao=$hex"
 }
 
+data class EventSearchFilter(
+    val query: String = "",
+    val type: FlightEventType? = null,
+    val fromMs: Long? = null,
+    val toMs: Long? = null
+)
+
 data class MonitorSettings(
     val pollIntervalSec: Int = 15,
     val pollRadiusNm: Int = 25,

@@ -3,7 +3,10 @@ package ro.constanta.flightnotifier
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import ro.constanta.flightnotifier.core.AirportConfig
+import ro.constanta.flightnotifier.core.EventSearch
 import ro.constanta.flightnotifier.core.FlightDetector
+import ro.constanta.flightnotifier.model.EventSearchFilter
+import ro.constanta.flightnotifier.model.FlightEvent
 import ro.constanta.flightnotifier.model.FlightEventType
 import ro.constanta.flightnotifier.model.RawAircraft
 
@@ -116,5 +119,29 @@ class FlightDetectorTest {
             t0
         )
         assertEquals(0, res.events.size)
+    }
+
+    @Test
+    fun filtersEventsByTimeRangeTypeAndQuery() {
+        val t1 = 1_700_000_000_000L
+        val t2 = t1 + 3_600_000L // +1h
+        val t3 = t1 + 86_400_000L // +24h
+
+        val events = listOf(
+            FlightEvent("1", FlightEventType.LANDING, t1, "4a1", "WZZ3128", "HA-LZN", "A21N", "Wizz Air", "LTN → CND", "18", 1.1, 100, 130, "air_to_ground"),
+            FlightEvent("2", FlightEventType.TAKEOFF, t2, "4a2", "THY1048", "TC-JSO", "B738", "Turkish Airlines", "CND → IST", "36", 2.0, 600, 160, "ground_to_air"),
+            FlightEvent("3", FlightEventType.LANDING, t3, "4a3", "ROT209", "YR-ATJ", "AT76", "TAROM", "OTP → CND", "18", 0.9, 80, 110, "air_to_ground")
+        )
+
+        val inWindow = EventSearch.filterEvents(events, EventSearchFilter(fromMs = t1, toMs = t2))
+        assertEquals(2, inWindow.size)
+
+        val onlyTakeoff = EventSearch.filterEvents(events, EventSearchFilter(type = FlightEventType.TAKEOFF))
+        assertEquals(1, onlyTakeoff.size)
+        assertEquals("THY1048", onlyTakeoff.first().callsign)
+
+        val byQuery = EventSearch.filterEvents(events, EventSearchFilter(query = "tarom"))
+        assertEquals(1, byQuery.size)
+        assertEquals("ROT209", byQuery.first().callsign)
     }
 }

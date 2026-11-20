@@ -235,7 +235,7 @@ class FlightDetector {
             if (seenHex.contains(hex)) continue
             val missingMs = nowMs - track.lastSeenMs
 
-             val latest = track.latest
+            val latest = track.latest
             val lastAlt = latest.altAglFt
             val lastVr = latest.verticalRateFpm
             if (

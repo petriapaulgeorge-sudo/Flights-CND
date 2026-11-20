@@ -4,15 +4,42 @@
     <string name="header_title">Monitor Trafic Constanța (CND)</string>
     <string name="header_subtitle">Aeroportul Mihail Kogălniceanu • LRCK • Pista 18/36</string>
     <string name="status_initial">Monitorizare oprită. Apasă butonul de mai jos pentru pornire.</string>
+
+    <string name="tab_radar">Radar &amp; Monitor</string>
+    <string name="tab_history">Istoric &amp; Căutare</string>
+
     <string name="btn_start_monitor">Pornește monitorizarea 24/7</string>
     <string name="btn_stop_monitor">Oprește monitorizarea</string>
     <string name="btn_sim_landing">Simulează aterizare (18)</string>
     <string name="btn_sim_takeoff">Simulează decolare (36)</string>
+
     <string name="section_alerts">Notificări active</string>
     <string name="opt_notify_landing">Notifică la aterizări pe LRCK</string>
     <string name="opt_notify_takeoff">Notifică la decolări de pe LRCK</string>
     <string name="opt_notify_approach">Alertă timpurie la apropiere finală (&lt; 12 km)</string>
-    <string name="section_history">Jurnal aterizări &amp; decolări</string>
-    <string name="btn_clear">Golește</string>
-    <string name="empty_events">Nu există încă evenimente. Apasă „Simulează aterizare” pentru a testa notificările pe telefon.</string>
+
+    <string name="section_recent">Ultimele evenimente</string>
+    <string name="btn_open_history">Vezi tot istoricul</string>
+
+    <string name="section_search_title">Căutare &amp; filtrare zboruri</string>
+    <string name="hint_search_query">Caută indicativ, companie, aeronavă, rută sau pistă…</string>
+    <string name="filter_all">Toate</string>
+    <string name="filter_landings">Aterizări</string>
+    <string name="filter_takeoffs">Decolări</string>
+
+    <string name="preset_today">Azi</string>
+    <string name="preset_24h">Ultimele 24h</string>
+    <string name="preset_7d">7 zile</string>
+    <string name="preset_all">Tot istoricul</string>
+
+    <string name="label_from">De la:</string>
+    <string name="label_to">Până la:</string>
+    <string name="btn_pick_date">Alege data</string>
+    <string name="btn_pick_time">Alege ora</string>
+    <string name="btn_reset_filters">Resetează filtrele</string>
+    <string name="btn_export_pdf">Exportă PDF</string>
+    <string name="btn_clear">Golește istoricul</string>
+
+    <string name="empty_events">Nu există încă evenimente. Apasă „Simulează aterizare” pentru a testa notificările.</string>
+    <string name="empty_search_results">Niciun zbor nu corespunde intervalului sau filtrelor selectate.</string>
 </resources>

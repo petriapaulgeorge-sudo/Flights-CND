@@ -1,4 +1,5 @@
 package ro.constanta.flightnotifier.data
+
 import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,28 +13,43 @@ import ro.constanta.flightnotifier.model.FeedSnapshot
 import ro.constanta.flightnotifier.model.FlightEvent
 import ro.constanta.flightnotifier.model.FlightEventType
 import ro.constanta.flightnotifier.model.MonitorSettings
+import java.io.File
+
 object FlightRepository {
+
     private const val PREFS_NAME = "constanta_flight_notifier_prefs"
-    private const val KEY_EVENTS = "events_json"
-    private const val MAX_EVENTS = 200
+    private const val LEGACY_KEY_EVENTS = "events_json"
+    private const val EVENTS_FILE_NAME = "flight_events.json"
+    private const val MAX_EVENTS = 2000
+
     val detector = FlightDetector()
     val simulator = FlightSimulator()
+
     private val _snapshot = MutableStateFlow(FeedSnapshot())
     val snapshot: StateFlow<FeedSnapshot> = _snapshot.asStateFlow()
+
     private val _events = MutableStateFlow<List<FlightEvent>>(emptyList())
     val events: StateFlow<List<FlightEvent>> = _events.asStateFlow()
+
     private val _settings = MutableStateFlow(MonitorSettings())
     val settings: StateFlow<MonitorSettings> = _settings.asStateFlow()
+
     private val _isMonitoring = MutableStateFlow(false)
     val isMonitoring: StateFlow<Boolean> = _isMonitoring.asStateFlow()
+
     @Volatile
     private var initialized = false
     private var prefs: SharedPreferences? = null
+    private var eventsFile: File? = null
+
     @Synchronized
     fun init(context: Context) {
         if (initialized) return
-        val appPrefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val appCtx = context.applicationContext
+        val appPrefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs = appPrefs
+        eventsFile = File(appCtx.filesDir, EVENTS_FILE_NAME)
+
         _settings.value = MonitorSettings(
             pollIntervalSec = appPrefs.getInt("pollIntervalSec", 15).coerceIn(8, 120),
             pollRadiusNm = appPrefs.getInt("pollRadiusNm", 25).coerceIn(10, 60),
@@ -45,12 +61,15 @@ object FlightRepository {
         _events.value = loadEvents(appPrefs)
         initialized = true
     }
+
     fun updateSnapshot(next: FeedSnapshot) {
         _snapshot.value = next
     }
+
     fun setMonitoring(running: Boolean) {
         _isMonitoring.value = running
     }
+
     fun updateSettings(next: MonitorSettings) {
         _settings.value = next
         prefs?.edit()
@@ -62,17 +81,21 @@ object FlightRepository {
             ?.putBoolean("autoStartOnBoot", next.autoStartOnBoot)
             ?.apply()
     }
+
     @Synchronized
     fun addEvent(event: FlightEvent) {
         val next = (listOf(event) + _events.value).take(MAX_EVENTS)
         _events.value = next
         saveEvents(next)
     }
+
     @Synchronized
     fun clearEvents() {
         _events.value = emptyList()
-        prefs?.edit()?.remove(KEY_EVENTS)?.apply()
+        runCatching { eventsFile?.delete() }
+        prefs?.edit()?.remove(LEGACY_KEY_EVENTS)?.apply()
     }
+
     private fun saveEvents(list: List<FlightEvent>) {
         val arr = JSONArray()
         for (e in list) {
@@ -96,10 +119,20 @@ object FlightRepository {
                 }
             )
         }
-        prefs?.edit()?.putString(KEY_EVENTS, arr.toString())?.apply()
+        val json = arr.toString()
+        val file = eventsFile
+        if (file != null) {
+            runCatching { file.writeText(json, Charsets.UTF_8) }
+        }
     }
+
     private fun loadEvents(appPrefs: SharedPreferences): List<FlightEvent> {
-        val raw = appPrefs.getString(KEY_EVENTS, null) ?: return emptyList()
+        val file = eventsFile
+        val raw = when {
+            file != null && file.exists() -> runCatching { file.readText(Charsets.UTF_8) }.getOrNull()
+            else -> appPrefs.getString(LEGACY_KEY_EVENTS, null)
+        } ?: return emptyList()
+
         return try {
             val arr = JSONArray(raw)
             val out = ArrayList<FlightEvent>(arr.length())
@@ -125,6 +158,10 @@ object FlightRepository {
                         simulated = o.optBoolean("simulated", false)
                     )
                 )
+            }
+            if (file != null && !file.exists() && out.isNotEmpty()) {
+                saveEvents(out)
+                appPrefs.edit().remove(LEGACY_KEY_EVENTS).apply()
             }
             out
         } catch (_: Exception) {
