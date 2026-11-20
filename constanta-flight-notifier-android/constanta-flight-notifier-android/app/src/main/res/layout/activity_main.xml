@@ -510,10 +510,140 @@
             android:orientation="vertical"
             android:padding="16dp">
 
+            <!-- Card 0: Buton colorat operabilitate aterizare / decolare (1 Verde -> 5 Roșu) -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardBackgroundColor="@color/card_bg"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="0dp"
+                app:strokeColor="@color/card_stroke"
+                app:strokeWidth="1dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/runway_operability_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14.5sp"
+                        android:textStyle="bold" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_rwy_operability"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:minHeight="52dp"
+                        android:text="NIVEL 1/5 • OPERAȚIONALĂ"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        app:backgroundTint="#16A34A"
+                        app:cornerRadius="10dp" />
+
+                    <!-- Bară vizuală 1 (Verde) -> 5 (Roșu) -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/tv_rwy_lvl_1"
+                            android:layout_width="0dp"
+                            android:layout_height="28dp"
+                            android:layout_marginEnd="4dp"
+                            android:layout_weight="1"
+                            android:background="#16A34A"
+                            android:gravity="center"
+                            android:text="1"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_rwy_lvl_2"
+                            android:layout_width="0dp"
+                            android:layout_height="28dp"
+                            android:layout_marginEnd="4dp"
+                            android:layout_weight="1"
+                            android:background="#65A30D"
+                            android:gravity="center"
+                            android:text="2"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_rwy_lvl_3"
+                            android:layout_width="0dp"
+                            android:layout_height="28dp"
+                            android:layout_marginEnd="4dp"
+                            android:layout_weight="1"
+                            android:background="#D97706"
+                            android:gravity="center"
+                            android:text="3"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_rwy_lvl_4"
+                            android:layout_width="0dp"
+                            android:layout_height="28dp"
+                            android:layout_marginEnd="4dp"
+                            android:layout_weight="1"
+                            android:background="#EA580C"
+                            android:gravity="center"
+                            android:text="4"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_rwy_lvl_5"
+                            android:layout_width="0dp"
+                            android:layout_height="28dp"
+                            android:layout_weight="1"
+                            android:background="#DC2626"
+                            android:gravity="center"
+                            android:text="5"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tv_rwy_operability_desc"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Aterizare / Decolare: Se evaluează starea pistei și condițiile meteo…"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12.5sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:text="@string/runway_operability_hint"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="11.5sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- Card 1: Date fizice pistă LRCK 18/36 -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
                 app:cardBackgroundColor="@color/card_bg"
                 app:cardCornerRadius="12dp"
                 app:cardElevation="0dp"

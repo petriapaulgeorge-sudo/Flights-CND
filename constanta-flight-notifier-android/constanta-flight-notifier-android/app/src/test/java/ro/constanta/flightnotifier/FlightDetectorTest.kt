@@ -301,6 +301,42 @@ class FlightDetectorTest {
     }
 
     @Test
+    fun evaluatesRunwayOperabilityScale1To5() {
+        // Nivel 1 (Verde): CAVOK, vânt slab, RWYCC 6, Operațională
+        val clearCond = RunwayStatusClient.parseMetar("LRCK 201200Z 36006KT CAVOK 22/10 Q1016 NOSIG")
+        val lvl1 = RunwayStatusClient.evaluateOperability(clearCond, "Operațională", "6 — Uscat")
+        assertEquals(1, lvl1.level)
+        assertEquals("#16A34A", lvl1.colorHex)
+
+        // Nivel 2 (Verde-galben): ploaie ușoară, RWYCC 5
+        val rainCond = RunwayStatusClient.parseMetar("LRCK 201200Z 36010KT 8000 -RA BKN020 12/10 Q1012 NOSIG")
+        val lvl2 = RunwayStatusClient.evaluateOperability(rainCond, "Operațională", "5 — Umed / Bun")
+        assertEquals(2, lvl2.level)
+        assertEquals("#65A30D", lvl2.colorHex)
+
+        // Nivel 3 (Galben): IFR / risc polei
+        val ifrCond = RunwayStatusClient.parseMetar("LRCK 201200Z 01014KT 3000 -RA BKN008 01/00 Q1010 NOSIG")
+        val lvl3 = RunwayStatusClient.evaluateOperability(ifrCond, "Operațională", "4 — Mediu-Bun")
+        assertEquals(3, lvl3.level)
+        assertEquals("#D97706", lvl3.colorHex)
+
+        // Nivel 4 (Portocaliu): Furtună / LIFR
+        val stormCond = RunwayStatusClient.parseMetar("LRCK 201200Z 27028G38KT 1200 +TSRA BKN004CB 16/15 Q1002 NOSIG")
+        val lvl4 = RunwayStatusClient.evaluateOperability(stormCond, "Operațională", "3 — Mediu")
+        assertEquals(4, lvl4.level)
+        assertEquals("#EA580C", lvl4.colorHex)
+
+        // Nivel 5 (Roșu): Pistă închisă sau SNOCLO sau RWYCC 0
+        val lvl5Closed = RunwayStatusClient.evaluateOperability(clearCond, "Închisă", "6 — Uscat")
+        assertEquals(5, lvl5Closed.level)
+        assertEquals("#DC2626", lvl5Closed.colorHex)
+
+        val snocloCond = RunwayStatusClient.parseMetar("LRCK 201200Z 02018KT 0400 +SN VV002 M03/M04 Q1004 R36/SNOCLO")
+        val lvl5Snow = RunwayStatusClient.evaluateOperability(snocloCond, "Operațională", "0 — Gheață / Critic")
+        assertEquals(5, lvl5Snow.level)
+    }
+
+    @Test
     fun filtersEventsByTimeRangeTypeAndQuery() {
         val t1 = 1_700_000_000_000L
         val t2 = t1 + 3_600_000L

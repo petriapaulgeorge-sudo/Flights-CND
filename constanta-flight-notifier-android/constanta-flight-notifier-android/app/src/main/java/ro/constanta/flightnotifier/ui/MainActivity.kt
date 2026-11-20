@@ -5,6 +5,7 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
@@ -34,6 +35,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.tabs.TabLayout
@@ -51,6 +53,7 @@ import ro.constanta.flightnotifier.core.DailyReportPdfExporter
 import ro.constanta.flightnotifier.core.EventSearch
 import ro.constanta.flightnotifier.core.PdfExporter
 import ro.constanta.flightnotifier.core.RunwayConditions
+import ro.constanta.flightnotifier.core.RunwayOperability
 import ro.constanta.flightnotifier.core.RunwayStatusClient
 import ro.constanta.flightnotifier.data.FlightRepository
 import ro.constanta.flightnotifier.data.LocalRunwayNote
@@ -98,6 +101,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var paneAbout: View
 
     // Stare pistă
+    private lateinit var btnRwyOperability: MaterialButton
+    private lateinit var tvRwyOperabilityDesc: TextView
+    private lateinit var rwyLevelViews: List<TextView>
     private lateinit var tvRwyFlightCat: TextView
     private lateinit var tvRwyObsTime: TextView
     private lateinit var tvRwySurface: TextView
@@ -108,6 +114,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var chipGroupRwycc: ChipGroup
     private lateinit var etRunwayNote: TextInputEditText
     private var runwayLoadedOnce = false
+    private var lastRunwayConditions: RunwayConditions? = null
+    private var lastRunwayOperability: RunwayOperability? = null
 
     // Istoric & căutare
     private lateinit var etSearchQuery: TextInputEditText
@@ -268,6 +276,15 @@ class MainActivity : AppCompatActivity() {
         paneReport = findViewById(R.id.pane_report)
         paneAbout = findViewById(R.id.pane_about)
 
+        btnRwyOperability = findViewById(R.id.btn_rwy_operability)
+        tvRwyOperabilityDesc = findViewById(R.id.tv_rwy_operability_desc)
+        rwyLevelViews = listOf(
+            findViewById(R.id.tv_rwy_lvl_1),
+            findViewById(R.id.tv_rwy_lvl_2),
+            findViewById(R.id.tv_rwy_lvl_3),
+            findViewById(R.id.tv_rwy_lvl_4),
+            findViewById(R.id.tv_rwy_lvl_5)
+        )
         tvRwyFlightCat = findViewById(R.id.tv_rwy_flight_cat)
         tvRwyObsTime = findViewById(R.id.tv_rwy_obs_time)
         tvRwySurface = findViewById(R.id.tv_rwy_surface)
@@ -468,30 +485,99 @@ class MainActivity : AppCompatActivity() {
         }
         chipGroupRwycc.check(rwyccChipId)
 
+        chipGroupRwyState.setOnCheckedStateChangeListener { _, _ ->
+            updateRunwayOperabilityButton()
+        }
+        chipGroupRwycc.setOnCheckedStateChangeListener { _, _ ->
+            updateRunwayOperabilityButton()
+        }
+
+        btnRwyOperability.setOnClickListener {
+            showOperabilityDetailsDialog()
+        }
+
         findViewById<Button>(R.id.btn_refresh_runway).setOnClickListener {
             refreshRunwayConditions()
         }
 
         findViewById<Button>(R.id.btn_save_runway_note).setOnClickListener {
-            val opState = when (chipGroupRwyState.checkedChipId) {
-                R.id.chip_rwy_caution -> "Atenție meteo"
-                R.id.chip_rwy_restricted -> "Restricționată"
-                R.id.chip_rwy_closed -> "Închisă"
-                else -> "Operațională"
-            }
-            val rwycc = when (chipGroupRwycc.checkedChipId) {
-                R.id.chip_rwycc_5 -> "5 — Umed / Bun"
-                R.id.chip_rwycc_4 -> "4 — Mediu-Bun"
-                R.id.chip_rwycc_3 -> "3 — Mediu"
-                R.id.chip_rwycc_2 -> "2 — Mediu-Slab"
-                R.id.chip_rwycc_1 -> "1 — Slab"
-                R.id.chip_rwycc_0 -> "0 — Gheață / Critic"
-                else -> "6 — Uscat"
-            }
+            val opState = currentLocalOperationalState()
+            val rwycc = currentLocalRwyccCode()
             val noteText = etRunwayNote.text?.toString()?.trim().orEmpty()
             FlightRepository.saveLocalRunwayNote(LocalRunwayNote(opState, rwycc, noteText))
+            updateRunwayOperabilityButton()
             Toast.makeText(this, "Starea locală a pistei a fost salvată ($opState, RWYCC $rwycc).", Toast.LENGTH_SHORT).show()
         }
+
+        updateRunwayOperabilityButton()
+    }
+
+    private fun currentLocalOperationalState(): String {
+        return when (chipGroupRwyState.checkedChipId) {
+            R.id.chip_rwy_caution -> "Atenție meteo"
+            R.id.chip_rwy_restricted -> "Restricționată"
+            R.id.chip_rwy_closed -> "Închisă"
+            else -> "Operațională"
+        }
+    }
+
+    private fun currentLocalRwyccCode(): String {
+        return when (chipGroupRwycc.checkedChipId) {
+            R.id.chip_rwycc_5 -> "5 — Umed / Bun"
+            R.id.chip_rwycc_4 -> "4 — Mediu-Bun"
+            R.id.chip_rwycc_3 -> "3 — Mediu"
+            R.id.chip_rwycc_2 -> "2 — Mediu-Slab"
+            R.id.chip_rwycc_1 -> "1 — Slab"
+            R.id.chip_rwycc_0 -> "0 — Gheață / Critic"
+            else -> "6 — Uscat"
+        }
+    }
+
+    private fun updateRunwayOperabilityButton() {
+        val op = RunwayStatusClient.evaluateOperability(
+            conditions = lastRunwayConditions,
+            localOperationalState = currentLocalOperationalState(),
+            localRwyccCode = currentLocalRwyccCode()
+        )
+        lastRunwayOperability = op
+        btnRwyOperability.text = op.shortTitle
+        btnRwyOperability.backgroundTintList = ColorStateList.valueOf(Color.parseColor(op.colorHex))
+        tvRwyOperabilityDesc.text = op.suggestion
+
+        rwyLevelViews.forEachIndexed { idx, tv ->
+            val lvl = idx + 1
+            val isActive = lvl == op.level
+            tv.alpha = if (isActive) 1.0f else 0.28f
+            tv.text = if (isActive) "● $lvl" else "$lvl"
+        }
+    }
+
+    private fun showOperabilityDetailsDialog() {
+        val op = lastRunwayOperability ?: RunwayStatusClient.evaluateOperability(
+            conditions = lastRunwayConditions,
+            localOperationalState = currentLocalOperationalState(),
+            localRwyccCode = currentLocalRwyccCode()
+        )
+        val body = buildString {
+            append("${op.suggestion}\n\n")
+            append("Factori evaluați (meteo + stare pistă):\n")
+            for (f in op.factors) {
+                append("• $f\n")
+            }
+            append("\nScală culori (1 → 5):\n")
+            append("1 (Verde) — Operațională, condiții optime\n")
+            append("2 (Verde-galben) — Operațională cu atenție\n")
+            append("3 (Galben) — Restricții moderate (IFR / frânare)\n")
+            append("4 (Portocaliu) — Operabilitate dificilă / risc ridicat\n")
+            append("5 (Roșu) — Neoperațională / critică\n\n")
+            append("Notă: Evaluare orientativă; decizia operațională aparține echipajului și ATC.")
+        }
+        AlertDialog.Builder(this)
+            .setTitle(op.shortTitle)
+            .setMessage(body)
+            .setPositiveButton("Actualizează METAR") { _, _ -> refreshRunwayConditions() }
+            .setNegativeButton("Închide", null)
+            .show()
     }
 
     private fun refreshRunwayConditions() {
@@ -506,6 +592,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderRunwayConditions(c: RunwayConditions) {
+        lastRunwayConditions = c
+        updateRunwayOperabilityButton()
+
         if (!c.ok) {
             tvRwyFlightCat.text = "N/A"
             tvRwyFlightCat.setBackgroundColor(Color.parseColor("#64748B"))

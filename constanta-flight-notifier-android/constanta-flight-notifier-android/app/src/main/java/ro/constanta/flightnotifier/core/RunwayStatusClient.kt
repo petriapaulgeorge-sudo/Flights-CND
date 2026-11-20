@@ -15,6 +15,14 @@ data class RunwayWindComponent(
     val crosswindKt: Int
 )
 
+data class RunwayOperability(
+    val level: Int,               // 1 (Verde - operațională) -> 5 (Roșu - neoperațională)
+    val shortTitle: String,       // ex: "NIVEL 1/5 • OPERAȚIONALĂ"
+    val suggestion: String,       // sugestie aterizare / decolare
+    val colorHex: String,         // culoare buton
+    val factors: List<String>     // motivele care au stabilit nivelul
+)
+
 data class RunwayConditions(
     val ok: Boolean,
     val source: String,
@@ -34,13 +42,22 @@ data class RunwayConditions(
     val icingRisk: Boolean = false,
     val rvrAndStateGroups: String = "Nu sunt raportate coduri speciale",
     val flightCategory: String = "VFR",
+    val windSpeedKt: Int? = null,
+    val windGustKt: Int? = null,
+    val crosswindKt: Int? = null,
+    val visibilityMeters: Int? = null,
+    val lowestCeilingFt: Int? = null,
+    val hasThunderstorm: Boolean = false,
+    val hasFreezingPrecip: Boolean = false,
+    val hasRain: Boolean = false,
+    val hasSnoclo: Boolean = false,
     val fetchedAtMs: Long = System.currentTimeMillis(),
     val error: String? = null
 )
 
 object RunwayStatusClient {
 
-    private const val USER_AGENT = "SAT-Monitorizare-Trafic-CND/1.4 (LRCK)"
+    private const val USER_AGENT = "SAT-Monitorizare-Trafic-CND/1.6 (LRCK)"
     private const val TIMEOUT_MS = 8000
 
     fun fetchLiveRunwayConditions(): RunwayConditions {
@@ -115,6 +132,9 @@ object RunwayStatusClient {
         var rwy18Wind: RunwayWindComponent? = null
         var rwy36Wind: RunwayWindComponent? = null
         var recommendedRunway = "18 / 36 (după traficul ATC)"
+        var parsedWindSpdKt: Int? = null
+        var parsedWindGustKt: Int? = null
+        var parsedCrosswindKt: Int? = null
 
         if (windMatch != null) {
             val dirStr = windMatch.groupValues[1]
@@ -124,6 +144,8 @@ object RunwayStatusClient {
             val factor = if (unit == "MPS") 1.94384 else 1.0
             val spdKt = (rawSpd * factor).roundToInt()
             val gustKt = rawGust?.let { (it * factor).roundToInt() }
+            parsedWindSpdKt = spdKt
+            parsedWindGustKt = gustKt
 
             windSummary = when {
                 spdKt == 0 -> "Calm (0 kt)"
@@ -137,12 +159,14 @@ object RunwayStatusClient {
                 val c36 = computeWindComponent("36", 360, dirDeg, spdKt)
                 rwy18Wind = c18
                 rwy36Wind = c36
+                parsedCrosswindKt = minOf(c18.crosswindKt, c36.crosswindKt)
                 recommendedRunway = when {
                     c36.headwindKt > c18.headwindKt -> "Pista 36 (vânt frontal ${c36.headwindKt} kt, lateral ${c36.crosswindKt} kt)"
                     c18.headwindKt > c36.headwindKt -> "Pista 18 (vânt frontal ${c18.headwindKt} kt, lateral ${c18.crosswindKt} kt)"
                     else -> "Pista 18 sau 36 (vânt lateral ${c18.crosswindKt} kt)"
                 }
             } else if (spdKt == 0) {
+                parsedCrosswindKt = 0
                 recommendedRunway = "Pista 36 / 18 (vânt calm)"
             }
         }
@@ -270,7 +294,144 @@ object RunwayStatusClient {
             surfaceEstimate = surfaceEstimate,
             icingRisk = icingRisk,
             rvrAndStateGroups = rvrAndState,
-            flightCategory = flightCategory
+            flightCategory = flightCategory,
+            windSpeedKt = parsedWindSpdKt,
+            windGustKt = parsedWindGustKt,
+            crosswindKt = parsedCrosswindKt,
+            visibilityMeters = visMeters,
+            lowestCeilingFt = lowestCeilingFt,
+            hasThunderstorm = hasStorm,
+            hasFreezingPrecip = hasFreezing,
+            hasRain = hasRain,
+            hasSnoclo = hasSnoclo
+        )
+    }
+
+    /**
+     * Evaluează operabilitatea pistei pentru aterizare / decolare pe o scară de la
+     * 1 (Verde — operațională, condiții optime) până la 5 (Roșu — neoperațională / critică),
+     * combinând datele METAR live cu evaluarea locală a pistei (stare operațională + cod RWYCC).
+     */
+    fun evaluateOperability(
+        conditions: RunwayConditions?,
+        localOperationalState: String = "Operațională",
+        localRwyccCode: String = "6 — Uscat"
+    ): RunwayOperability {
+        var level = 1
+        val factors = mutableListOf<String>()
+
+        fun raiseTo(target: Int, reason: String) {
+            if (target > level) level = target
+            factors.add(reason)
+        }
+
+        // A. Stare operațională locală setată de operator
+        when {
+            localOperationalState.contains("Închis", ignoreCase = true) ->
+                raiseTo(5, "Stare pistă locală: ÎNCHISĂ")
+            localOperationalState.contains("Restricț", ignoreCase = true) ->
+                raiseTo(3, "Stare pistă locală: Restricționată")
+            localOperationalState.contains("Atenție", ignoreCase = true) ->
+                raiseTo(2, "Stare pistă locală: Atenție meteo")
+        }
+
+        // B. Cod RWYCC (GRF 6 -> 0)
+        val rwyccDigit = localRwyccCode.trim().firstOrNull()?.digitToIntOrNull() ?: 6
+        when (rwyccDigit) {
+            0 -> raiseTo(5, "RWYCC 0 — Gheață / frânare critică (sub minim)")
+            1 -> raiseTo(4, "RWYCC 1 — Frânare slabă")
+            2 -> raiseTo(4, "RWYCC 2 — Frânare mediu-slabă")
+            3 -> raiseTo(3, "RWYCC 3 — Frânare medie (pistă contaminată/alunecoasă)")
+            4 -> raiseTo(3, "RWYCC 4 — Frânare mediu-bună")
+            5 -> raiseTo(2, "RWYCC 5 — Suprafață umedă (frânare bună)")
+        }
+
+        // C. Condiții meteo live METAR LRCK
+        if (conditions != null && conditions.ok) {
+            if (conditions.hasSnoclo) {
+                raiseTo(5, "METAR raportează SNOCLO (pistă închisă din cauza zăpezii)")
+            }
+
+            val vis = conditions.visibilityMeters
+            val ceil = conditions.lowestCeilingFt
+            when {
+                (vis != null && vis < 350) || (ceil != null && ceil < 150) ->
+                    raiseTo(5, "Vizibilitate/plafon sub minimele curente (viz. ${conditions.visibilityText}, plafon ${conditions.ceilingText})")
+                conditions.flightCategory == "LIFR" ->
+                    raiseTo(4, "Categorie LIFR — vizibilitate redusă / plafon foarte jos (proceduri LVP)")
+                conditions.flightCategory == "IFR" ->
+                    raiseTo(3, "Categorie IFR — operare instrumentală obligatorie")
+                conditions.flightCategory == "MVFR" ->
+                    raiseTo(2, "Categorie MVFR — vizibilitate sau plafon moderat")
+            }
+
+            val xw = conditions.crosswindKt ?: 0
+            val gust = conditions.windGustKt ?: conditions.windSpeedKt ?: 0
+            when {
+                xw >= 34 || gust >= 45 ->
+                    raiseTo(5, "Vânt extrem: lateral $xw kt / rafale $gust kt (peste limitele uzuale)")
+                xw >= 27 || gust >= 35 ->
+                    raiseTo(4, "Vânt sever: lateral $xw kt / rafale $gust kt")
+                xw >= 20 || gust >= 28 ->
+                    raiseTo(3, "Vânt puternic: lateral $xw kt / rafale $gust kt")
+                xw >= 14 || gust >= 20 ->
+                    raiseTo(2, "Vânt moderat: lateral $xw kt / rafale $gust kt")
+            }
+
+            if (conditions.hasThunderstorm) {
+                raiseTo(4, "Furtună / vijelie activă în zona aeroportului (${conditions.weatherPhenomena})")
+            }
+            if (conditions.hasFreezingPrecip) {
+                raiseTo(4, "Precipitații înghețate / ninsoare / polei (${conditions.weatherPhenomena})")
+            } else if (conditions.icingRisk) {
+                raiseTo(3, "Risc de polei / îngheț pe suprafața pistei (${conditions.tempDewText})")
+            } else if (conditions.hasRain) {
+                raiseTo(2, "Pistă umedă — precipitații active (${conditions.weatherPhenomena})")
+            }
+        } else if (conditions == null) {
+            factors.add("Datele METAR live nu sunt încă încărcate (se evaluează doar starea locală).")
+        } else {
+            factors.add("METAR live temporar indisponibil — evaluare bazată pe starea locală a pistei.")
+        }
+
+        if (factors.isEmpty()) {
+            factors.add("VFR, pistă uscată (RWYCC 6), vânt în limite normale — fără factori de risc.")
+        }
+
+        val (shortTitle, suggestion, colorHex) = when (level) {
+            1 -> Triple(
+                "NIVEL 1/5 • OPERAȚIONALĂ",
+                "Aterizare / Decolare: Recomandată fără restricții (condiții optime).",
+                "#16A34A"
+            )
+            2 -> Triple(
+                "NIVEL 2/5 • OPERAȚIONALĂ (ATENȚIE)",
+                "Aterizare / Decolare: Posibilă în condiții bune, cu atenție la vânt / suprafață umedă.",
+                "#65A30D"
+            )
+            3 -> Triple(
+                "NIVEL 3/5 • RESTRICȚII MODERATE",
+                "Aterizare / Decolare: Posibilă instrumental (IFR) / cu rezerve de frânare și vânt.",
+                "#D97706"
+            )
+            4 -> Triple(
+                "NIVEL 4/5 • OPERABILITATE DIFICILĂ",
+                "Aterizare / Decolare: Dificilă — risc ridicat de întârzieri, holding sau redirecționare.",
+                "#EA580C"
+            )
+            else -> Triple(
+                "NIVEL 5/5 • NEOPERAȚIONALĂ",
+                "Aterizare / Decolare: Nerecomandată / Blocată (condiții critice sau pistă închisă).",
+                "#DC2626"
+            )
+        }
+
+        return RunwayOperability(
+            level = level.coerceIn(1, 5),
+            shortTitle = shortTitle,
+            suggestion = suggestion,
+            colorHex = colorHex,
+            factors = factors
         )
     }
 
