@@ -14,6 +14,7 @@ import ro.constanta.flightnotifier.model.FlightEvent
 import ro.constanta.flightnotifier.model.FlightEventType
 import ro.constanta.flightnotifier.model.MonitorSettings
 import java.io.File
+import kotlin.math.abs
 
 data class LocalRunwayNote(
     val operationalState: String = "Operațională",
@@ -56,13 +57,17 @@ object FlightRepository {
         prefs = appPrefs
         eventsFile = File(appCtx.filesDir, EVENTS_FILE_NAME)
 
+        val legacyEmg = appPrefs.getBoolean("notifyEmergency", true)
         _settings.value = MonitorSettings(
             pollIntervalSec = appPrefs.getInt("pollIntervalSec", 15).coerceIn(8, 120),
             pollRadiusNm = appPrefs.getInt("pollRadiusNm", 25).coerceIn(10, 60),
             notifyLanding = appPrefs.getBoolean("notifyLanding", true),
             notifyTakeoff = appPrefs.getBoolean("notifyTakeoff", true),
             notifyApproach = appPrefs.getBoolean("notifyApproach", false),
-            notifyEmergency = appPrefs.getBoolean("notifyEmergency", true),
+            notifyEmergency7700 = appPrefs.getBoolean("notifyEmergency7700", legacyEmg),
+            notifyEmergencyPan = appPrefs.getBoolean("notifyEmergencyPan", legacyEmg),
+            notifyEmergency7600 = appPrefs.getBoolean("notifyEmergency7600", legacyEmg),
+            notifyEmergency7500 = appPrefs.getBoolean("notifyEmergency7500", legacyEmg),
             autoStartOnBoot = appPrefs.getBoolean("autoStartOnBoot", true)
         )
         _events.value = loadEvents(appPrefs)
@@ -85,9 +90,18 @@ object FlightRepository {
             ?.putBoolean("notifyLanding", next.notifyLanding)
             ?.putBoolean("notifyTakeoff", next.notifyTakeoff)
             ?.putBoolean("notifyApproach", next.notifyApproach)
-            ?.putBoolean("notifyEmergency", next.notifyEmergency)
+            ?.putBoolean("notifyEmergency7700", next.notifyEmergency7700)
+            ?.putBoolean("notifyEmergencyPan", next.notifyEmergencyPan)
+            ?.putBoolean("notifyEmergency7600", next.notifyEmergency7600)
+            ?.putBoolean("notifyEmergency7500", next.notifyEmergency7500)
             ?.putBoolean("autoStartOnBoot", next.autoStartOnBoot)
             ?.apply()
+    }
+
+    fun getLastOnlineSyncMs(): Long = prefs?.getLong("lastOnlineSyncMs", 0L) ?: 0L
+
+    fun setLastOnlineSyncMs(tsMs: Long) {
+        prefs?.edit()?.putLong("lastOnlineSyncMs", tsMs)?.apply()
     }
 
     fun getLocalRunwayNote(): LocalRunwayNote {
@@ -109,9 +123,67 @@ object FlightRepository {
 
     @Synchronized
     fun addEvent(event: FlightEvent) {
-        val next = (listOf(event) + _events.value).take(MAX_EVENTS)
+        val next = (listOf(event) + _events.value)
+            .sortedByDescending { it.timestampMs }
+            .take(MAX_EVENTS)
         _events.value = next
         saveEvents(next)
+    }
+
+    /**
+     * Îmbină zborurile recuperate din OpenSky cu istoricul local, evitând dublurile
+     * (același hex și tip în fereastra de ±20 minute). Returnează numărul de zboruri nou adăugate.
+     */
+    @Synchronized
+    fun mergeRecoveredEvents(recovered: List<FlightEvent>): Int {
+        if (recovered.isEmpty()) return 0
+        val current = _events.value.toMutableList()
+        var added = 0
+        for (cand in recovered) {
+            val isDuplicate = current.any { existing ->
+                existing.type == cand.type &&
+                    existing.hex.equals(cand.hex, ignoreCase = true) &&
+                    abs(existing.timestampMs - cand.timestampMs) <= 20 * 60_000L
+            }
+            if (!isDuplicate) {
+                current.add(cand)
+                added += 1
+            }
+        }
+        if (added > 0) {
+            val sorted = current.sortedByDescending { it.timestampMs }.take(MAX_EVENTS)
+            _events.value = sorted
+            saveEvents(sorted)
+        }
+        return added
+    }
+
+    /**
+     * Șterge doar evenimentele simulate ale căror ID-uri sunt în [ids].
+     */
+    @Synchronized
+    fun deleteSimulatedEventsByIds(ids: Set<String>): Int {
+        if (ids.isEmpty()) return 0
+        val before = _events.value.size
+        val remaining = _events.value.filterNot { it.simulated && ids.contains(it.id) }
+        val removed = before - remaining.size
+        if (removed > 0) {
+            _events.value = remaining
+            saveEvents(remaining)
+        }
+        return removed
+    }
+
+    @Synchronized
+    fun deleteAllSimulatedEvents(): Int {
+        val before = _events.value.size
+        val remaining = _events.value.filterNot { it.simulated }
+        val removed = before - remaining.size
+        if (removed > 0) {
+            _events.value = remaining
+            saveEvents(remaining)
+        }
+        return removed
     }
 
     @Synchronized
@@ -142,6 +214,7 @@ object FlightRepository {
                     put("detectionReason", e.detectionReason)
                     put("simulated", e.simulated)
                     put("squawk", e.squawk ?: JSONObject.NULL)
+                    put("emergencyCode", e.emergencyCode ?: JSONObject.NULL)
                     put("emergencyLabel", e.emergencyLabel ?: JSONObject.NULL)
                 }
             )
@@ -184,6 +257,7 @@ object FlightRepository {
                         detectionReason = o.optString("detectionReason"),
                         simulated = o.optBoolean("simulated", false),
                         squawk = o.optString("squawk").takeIf { it.isNotBlank() && it != "null" },
+                        emergencyCode = o.optString("emergencyCode").takeIf { it.isNotBlank() && it != "null" },
                         emergencyLabel = o.optString("emergencyLabel").takeIf { it.isNotBlank() && it != "null" }
                     )
                 )
@@ -192,7 +266,7 @@ object FlightRepository {
                 saveEvents(out)
                 appPrefs.edit().remove(LEGACY_KEY_EVENTS).apply()
             }
-            out
+            out.sortedByDescending { it.timestampMs }
         } catch (_: Exception) {
             emptyList()
         }

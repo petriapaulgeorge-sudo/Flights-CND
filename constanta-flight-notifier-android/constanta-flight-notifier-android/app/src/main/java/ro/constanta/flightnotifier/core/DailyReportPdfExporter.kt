@@ -245,6 +245,37 @@ object DailyReportPdfExporter {
         canvas.drawText("TOTAL ARTICOLE INTERZISE", MARGIN_X + 10f, y + 14.5f, tdBoldPaint)
         canvas.drawText(p.total.toString(), PAGE_WIDTH - MARGIN_X - 45f, y + 14.5f, tdBoldPaint)
         canvas.drawLine(MARGIN_X, y + ROW_H, PAGE_WIDTH - MARGIN_X, y + ROW_H, linePaint)
+        y += ROW_H + 22f
+
+        // === 5. ALTE DATE DE INTERES ===
+        ensureSpace(70f)
+        canvas.drawText("4. Alte date de interes", MARGIN_X, y, sectionPaint)
+        y += 10f
+
+        val notesText = report.otherNotes.trim().ifBlank { "Fără alte mențiuni." }
+        val wrappedLines = wrapText(notesText, tdPaint, PAGE_WIDTH - MARGIN_X * 2 - 20f)
+        val lineH = 14f
+        var lineIdx = 0
+        while (lineIdx < wrappedLines.size) {
+            val remainingSpace = PAGE_HEIGHT - MARGIN_BOTTOM - y - 16f
+            val maxLinesOnPage = (remainingSpace / lineH).toInt().coerceAtLeast(1)
+            val endIdx = minOf(wrappedLines.size, lineIdx + maxLinesOnPage)
+            val chunk = wrappedLines.subList(lineIdx, endIdx)
+            val boxH = chunk.size * lineH + 14f
+
+            canvas.drawRect(MARGIN_X, y, PAGE_WIDTH - MARGIN_X, y + boxH, boxBg)
+            canvas.drawRect(MARGIN_X, y, PAGE_WIDTH - MARGIN_X, y + boxH, borderPaint)
+            var ty = y + 15f
+            for (line in chunk) {
+                canvas.drawText(line, MARGIN_X + 10f, ty, tdPaint)
+                ty += lineH
+            }
+            y += boxH + 8f
+            lineIdx = endIdx
+            if (lineIdx < wrappedLines.size) {
+                ensureSpace(60f)
+            }
+        }
 
         drawFooter(canvas, pageNum)
         doc.finishPage(page)
@@ -255,6 +286,29 @@ object DailyReportPdfExporter {
         } finally {
             doc.close()
         }
+    }
+
+    private fun wrapText(text: String, paint: Paint, maxWidth: Float): List<String> {
+        val result = mutableListOf<String>()
+        for (paragraph in text.split('\n')) {
+            val trimmed = paragraph.trim()
+            if (trimmed.isEmpty()) {
+                result.add("")
+                continue
+            }
+            var current = ""
+            for (word in trimmed.split(Regex("\\s+"))) {
+                val candidate = if (current.isEmpty()) word else "$current $word"
+                if (paint.measureText(candidate) <= maxWidth) {
+                    current = candidate
+                } else {
+                    if (current.isNotEmpty()) result.add(current)
+                    current = word
+                }
+            }
+            if (current.isNotEmpty()) result.add(current)
+        }
+        return if (result.isEmpty()) listOf("—") else result
     }
 
     private fun truncate(s: String, maxLen: Int): String {

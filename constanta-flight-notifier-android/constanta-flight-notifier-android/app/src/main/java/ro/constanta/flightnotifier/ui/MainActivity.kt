@@ -39,9 +39,12 @@ import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ro.constanta.flightnotifier.R
+import ro.constanta.flightnotifier.core.AdsbClient
+import ro.constanta.flightnotifier.core.AircraftRouteDetails
 import ro.constanta.flightnotifier.core.AirportConfig
 import ro.constanta.flightnotifier.core.DailyReportBuilder
 import ro.constanta.flightnotifier.core.DailyReportPdfExporter
@@ -82,7 +85,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var swLanding: SwitchMaterial
     private lateinit var swTakeoff: SwitchMaterial
     private lateinit var swApproach: SwitchMaterial
-    private lateinit var swEmergency: SwitchMaterial
+    private lateinit var swEmg7700: SwitchMaterial
+    private lateinit var swEmgPan: SwitchMaterial
+    private lateinit var swEmg7600: SwitchMaterial
+    private lateinit var swEmg7500: SwitchMaterial
+    private lateinit var btnDeleteRecentSim: Button
     private lateinit var tabLayout: TabLayout
     private lateinit var paneRadar: View
     private lateinit var paneRunway: View
@@ -109,6 +116,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnFromTime: Button
     private lateinit var btnToDate: Button
     private lateinit var btnToTime: Button
+    private lateinit var btnSyncMissed: Button
+    private lateinit var btnDeleteHistorySim: Button
+    private lateinit var btnDeleteAllSim: Button
 
     // Raport zilnic
     private lateinit var tvReportDate: TextView
@@ -127,6 +137,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etProhBlunt: EditText
     private lateinit var etProhExplosives: EditText
     private lateinit var tvProhTotal: TextView
+    private lateinit var etReportOtherNotes: TextInputEditText
 
     private lateinit var recentAdapter: EventsAdapter
     private lateinit var historyAdapter: EventsAdapter
@@ -136,6 +147,11 @@ class MainActivity : AppCompatActivity() {
     private var currentFilter = EventSearchFilter()
     private var fromCal: Calendar? = null
     private var toCal: Calendar? = null
+
+    // Aeronava selectată pe radar
+    private var selectedAircraftHex: String? = null
+    private var selectedAircraftDetails: AircraftRouteDetails? = null
+    private var selectedAircraftDetailsJob: Job? = null
 
     // Stare raport zilnic
     private var reportDateCal: Calendar = Calendar.getInstance()
@@ -240,7 +256,11 @@ class MainActivity : AppCompatActivity() {
         swLanding = findViewById(R.id.switch_landing)
         swTakeoff = findViewById(R.id.switch_takeoff)
         swApproach = findViewById(R.id.switch_approach)
-        swEmergency = findViewById(R.id.switch_emergency)
+        swEmg7700 = findViewById(R.id.switch_emg_7700)
+        swEmgPan = findViewById(R.id.switch_emg_pan)
+        swEmg7600 = findViewById(R.id.switch_emg_7600)
+        swEmg7500 = findViewById(R.id.switch_emg_7500)
+        btnDeleteRecentSim = findViewById(R.id.btn_delete_recent_sim)
         tabLayout = findViewById(R.id.tab_layout)
         paneRadar = findViewById(R.id.pane_radar)
         paneRunway = findViewById(R.id.pane_runway)
@@ -264,6 +284,9 @@ class MainActivity : AppCompatActivity() {
         btnFromTime = findViewById(R.id.btn_from_time)
         btnToDate = findViewById(R.id.btn_to_date)
         btnToTime = findViewById(R.id.btn_to_time)
+        btnSyncMissed = findViewById(R.id.btn_sync_missed)
+        btnDeleteHistorySim = findViewById(R.id.btn_delete_history_sim)
+        btnDeleteAllSim = findViewById(R.id.btn_delete_all_sim)
 
         tvReportDate = findViewById(R.id.tv_report_date)
         chipGroupSupervisor = findViewById(R.id.chip_group_supervisor)
@@ -281,18 +304,29 @@ class MainActivity : AppCompatActivity() {
         etProhBlunt = findViewById(R.id.et_proh_blunt)
         etProhExplosives = findViewById(R.id.et_proh_explosives)
         tvProhTotal = findViewById(R.id.tv_proh_total)
+        etReportOtherNotes = findViewById(R.id.et_report_other_notes)
 
         val openFlight: (FlightEvent) -> Unit = { evt ->
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(evt.adsbExchangeUrl)))
         }
 
         val rvRecent: RecyclerView = findViewById(R.id.rv_recent_events)
-        recentAdapter = EventsAdapter(openFlight)
+        recentAdapter = EventsAdapter(openFlight) { selectedCount ->
+            btnDeleteRecentSim.visibility = if (selectedCount > 0) View.VISIBLE else View.GONE
+            if (selectedCount > 0) {
+                btnDeleteRecentSim.text = "Șterge simulate selectate ($selectedCount)"
+            }
+        }
         rvRecent.layoutManager = LinearLayoutManager(this)
         rvRecent.adapter = recentAdapter
 
         val rvHistory: RecyclerView = findViewById(R.id.rv_history_events)
-        historyAdapter = EventsAdapter(openFlight)
+        historyAdapter = EventsAdapter(openFlight) { selectedCount ->
+            btnDeleteHistorySim.visibility = if (selectedCount > 0) View.VISIBLE else View.GONE
+            if (selectedCount > 0) {
+                btnDeleteHistorySim.text = "Șterge simulate selectate ($selectedCount)"
+            }
+        }
         rvHistory.layoutManager = LinearLayoutManager(this)
         rvHistory.adapter = historyAdapter
     }
@@ -334,18 +368,78 @@ class MainActivity : AppCompatActivity() {
         }
 
         radarView.setOnAircraftSelectedListener { ac: ActiveAircraft? ->
+            selectedAircraftDetailsJob?.cancel()
             if (ac == null) {
+                selectedAircraftHex = null
+                selectedAircraftDetails = null
                 tvSelectedAircraft.visibility = View.GONE
             } else {
-                val alt = if (ac.onGround) "LA SOL" else "${ac.altAglFt ?: "—"} ft AGL"
-                val vs = ac.verticalRateFpm?.let { if (it > 0) "+$it fpm" else "$it fpm" } ?: "—"
-                val typeStr = ac.aircraftType.ifBlank { ac.hex.uppercase() }
-                val sqStr = if (ac.squawk.isNotBlank()) " • SQ ${ac.squawk}" else ""
-                tvSelectedAircraft.text =
-                    "${ac.callsign} ($typeStr)$sqStr • $alt • ${ac.gsKt ?: "—"} kt • V/S $vs • ${ac.distKm} km"
-                tvSelectedAircraft.visibility = View.VISIBLE
+                selectedAircraftHex = ac.hex
+                val cached = AdsbClient.getCachedAircraftRouteDetails(ac.hex, ac.callsign)
+                selectedAircraftDetails = cached
+                renderSelectedAircraftPanel(ac, cached, loading = cached == null)
+
+                if (cached == null) {
+                    val targetHex = ac.hex
+                    val targetCallsign = ac.callsign
+                    val hintAirline = ac.airlineHint
+                    val hintRoute = ac.routeHint
+                    selectedAircraftDetailsJob = lifecycleScope.launch {
+                        val fetched = withContext(Dispatchers.IO) {
+                            AdsbClient.fetchAircraftRouteDetails(
+                                hex = targetHex,
+                                callsign = targetCallsign,
+                                airlineHint = hintAirline,
+                                routeHint = hintRoute
+                            )
+                        }
+                        if (selectedAircraftHex == targetHex) {
+                            selectedAircraftDetails = fetched
+                            val latestAc = FlightRepository.snapshot.value.activeAircraft
+                                .firstOrNull { it.hex == targetHex } ?: ac
+                            renderSelectedAircraftPanel(latestAc, fetched, loading = false)
+                        }
+                    }
+                }
             }
         }
+    }
+
+    private fun renderSelectedAircraftPanel(
+        ac: ActiveAircraft,
+        details: AircraftRouteDetails?,
+        loading: Boolean
+    ) {
+        val alt = if (ac.onGround) "LA SOL" else "${ac.altAglFt ?: "—"} ft AGL"
+        val vs = ac.verticalRateFpm?.let { if (it > 0) "+$it fpm" else "$it fpm" } ?: "—"
+        val model = details?.aircraftModel?.takeIf { it.isNotBlank() }
+            ?: ac.aircraftType.ifBlank { ac.hex.uppercase(Locale.US) }
+        val reg = details?.registration?.takeIf { it.isNotBlank() }
+            ?: ac.registration.takeIf { it.isNotBlank() }
+        val regPart = if (reg != null) " ($reg)" else ""
+        val sqStr = if (ac.squawk.isNotBlank()) " • SQ ${ac.squawk}" else ""
+        val emInfo = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
+        val emTag = if (emInfo != null) " • [${emInfo.shortBadge}]" else ""
+
+        val airlineText = details?.airline?.takeIf { it.isNotBlank() }
+            ?: ac.airlineHint?.takeIf { it.isNotBlank() }
+            ?: AdsbClient.resolveKnownAirline(ac.callsign)
+            ?: if (loading) "Se caută…" else "Indisponibilă în baza ADS-B"
+
+        val originText = details?.origin?.takeIf { it.isNotBlank() }
+            ?: if (loading) "Se caută…" else "Indisponibilă (fără plan de zbor public)"
+
+        val destText = details?.destination?.takeIf { it.isNotBlank() }
+            ?: if (loading) "Se caută…" else "Indisponibilă (fără plan de zbor public)"
+
+        tvSelectedAircraft.text = buildString {
+            append("${ac.callsign} • $model$regPart$sqStr$emTag\n")
+            append("Companie: $airlineText\n")
+            append("Origine: $originText\n")
+            append("Destinație: $destText\n")
+            append("Telemetrie: $alt • ${ac.gsKt ?: "—"} kt • V/S $vs • ${ac.distKm} km de LRCK")
+        }
+        tvSelectedAircraft.visibility = View.VISIBLE
     }
 
     // =========================================================================
@@ -482,7 +576,10 @@ class MainActivity : AppCompatActivity() {
         swLanding.isChecked = s.notifyLanding
         swTakeoff.isChecked = s.notifyTakeoff
         swApproach.isChecked = s.notifyApproach
-        swEmergency.isChecked = s.notifyEmergency
+        swEmg7700.isChecked = s.notifyEmergency7700
+        swEmgPan.isChecked = s.notifyEmergencyPan
+        swEmg7600.isChecked = s.notifyEmergency7600
+        swEmg7500.isChecked = s.notifyEmergency7500
 
         val saveToggle = {
             FlightRepository.updateSettings(
@@ -490,14 +587,20 @@ class MainActivity : AppCompatActivity() {
                     notifyLanding = swLanding.isChecked,
                     notifyTakeoff = swTakeoff.isChecked,
                     notifyApproach = swApproach.isChecked,
-                    notifyEmergency = swEmergency.isChecked
+                    notifyEmergency7700 = swEmg7700.isChecked,
+                    notifyEmergencyPan = swEmgPan.isChecked,
+                    notifyEmergency7600 = swEmg7600.isChecked,
+                    notifyEmergency7500 = swEmg7500.isChecked
                 )
             )
         }
         swLanding.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swTakeoff.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swApproach.setOnCheckedChangeListener { _, _ -> saveToggle() }
-        swEmergency.setOnCheckedChangeListener { _, _ -> saveToggle() }
+        swEmg7700.setOnCheckedChangeListener { _, _ -> saveToggle() }
+        swEmgPan.setOnCheckedChangeListener { _, _ -> saveToggle() }
+        swEmg7600.setOnCheckedChangeListener { _, _ -> saveToggle() }
+        swEmg7500.setOnCheckedChangeListener { _, _ -> saveToggle() }
 
         btnToggleMonitor.setOnClickListener {
             if (FlightRepository.isMonitoring.value) {
@@ -528,14 +631,40 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btn_sim_emergency).setOnClickListener {
-            chipGroupZoom.check(R.id.chip_zoom_45)
-            ensureNotificationPermissionAndAction(
-                Intent(this, FlightMonitorService::class.java).apply {
-                    action = FlightMonitorService.ACTION_SIMULATE
-                    putExtra(FlightMonitorService.EXTRA_SIM_KIND, "emergency")
-                    putExtra(FlightMonitorService.EXTRA_SIM_RUNWAY, "18")
-                }
+            val labels = arrayOf(
+                "Cod 7700 — MAYDAY (Urgență generală)",
+                "PAN-PAN — Urgență medicală / LIFEGUARD",
+                "Cod 7600 — Pierdere comunicații radio (NORDO)",
+                "Cod 7500 — Intervenție ilegală (HIJACK)"
             )
+            val kinds = arrayOf("emergency_7700", "emergency_pan", "emergency_7600", "emergency_7500")
+            AlertDialog.Builder(this)
+                .setTitle("Alege tipul de urgență de simulat")
+                .setItems(labels) { _, which ->
+                    chipGroupZoom.check(R.id.chip_zoom_45)
+                    ensureNotificationPermissionAndAction(
+                        Intent(this, FlightMonitorService::class.java).apply {
+                            action = FlightMonitorService.ACTION_SIMULATE
+                            putExtra(FlightMonitorService.EXTRA_SIM_KIND, kinds[which])
+                            putExtra(FlightMonitorService.EXTRA_SIM_RUNWAY, "18")
+                        }
+                    )
+                }
+                .setNegativeButton("Anulează", null)
+                .show()
+        }
+
+        btnDeleteRecentSim.setOnClickListener {
+            val ids = recentAdapter.getSelectedSimulatedIds()
+            val removed = FlightRepository.deleteSimulatedEventsByIds(ids)
+            recentAdapter.clearSelection()
+            if (removed > 0) {
+                Toast.makeText(
+                    this,
+                    "Au fost șterse $removed zboruri simulate.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
 
@@ -623,6 +752,43 @@ class MainActivity : AppCompatActivity() {
             createHistoryPdfLauncher.launch("SAT_CND_Istoric_$stamp.pdf")
         }
 
+        btnSyncMissed.setOnClickListener {
+            syncMissedFlightsManually()
+        }
+
+        btnDeleteHistorySim.setOnClickListener {
+            val ids = historyAdapter.getSelectedSimulatedIds()
+            val removed = FlightRepository.deleteSimulatedEventsByIds(ids)
+            historyAdapter.clearSelection()
+            if (removed > 0) {
+                Toast.makeText(
+                    this,
+                    "Au fost șterse $removed zboruri simulate.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+
+        btnDeleteAllSim.setOnClickListener {
+            val simCount = allEvents.count { it.simulated }
+            if (simCount == 0) return@setOnClickListener
+            AlertDialog.Builder(this)
+                .setTitle("Ștergi toate zborurile simulate?")
+                .setMessage("Vor fi șterse toate cele $simCount zboruri de test (zborurile reale rămân intacte).")
+                .setPositiveButton("Șterge simulatele") { _, _ ->
+                    val removed = FlightRepository.deleteAllSimulatedEvents()
+                    recentAdapter.clearSelection()
+                    historyAdapter.clearSelection()
+                    Toast.makeText(
+                        this,
+                        "Au fost șterse $removed zboruri simulate.",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                .setNegativeButton("Anulează", null)
+                .show()
+        }
+
         findViewById<Button>(R.id.btn_clear_events).setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Golești istoricul?")
@@ -633,6 +799,46 @@ class MainActivity : AppCompatActivity() {
         }
 
         updateIntervalButtons()
+    }
+
+    private fun syncMissedFlightsManually() {
+        btnSyncMissed.isEnabled = false
+        btnSyncMissed.text = "Se sincronizează din OpenSky…"
+        lifecycleScope.launch {
+            val nowMs = System.currentTimeMillis()
+            val nowSec = nowMs / 1000L
+            val lastSyncMs = FlightRepository.getLastOnlineSyncMs()
+            val maxLookbackMs = 48L * 3600_000L
+            val defaultLookbackMs = 24L * 3600_000L
+            val beginMs = if (lastSyncMs > 0L && (nowMs - lastSyncMs) in 60_000L..maxLookbackMs) {
+                (lastSyncMs - 10 * 60_000L).coerceAtLeast(nowMs - maxLookbackMs)
+            } else {
+                nowMs - defaultLookbackMs
+            }
+
+            val result = withContext(Dispatchers.IO) {
+                AdsbClient.fetchMissedFlightsFromOpenSky(beginMs / 1000L, nowSec)
+            }
+            btnSyncMissed.isEnabled = true
+            btnSyncMissed.text = getString(R.string.btn_sync_missed)
+
+            if (result.ok) {
+                val added = FlightRepository.mergeRecoveredEvents(result.events)
+                FlightRepository.setLastOnlineSyncMs(nowMs)
+                val msg = if (added > 0) {
+                    "Au fost recuperate $added zboruri din perioada offline (OpenSky)."
+                } else {
+                    "Sincronizare completă: nu au fost găsite zboruri noi de recuperat din OpenSky."
+                }
+                Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(
+                    this@MainActivity,
+                    "OpenSky indisponibil temporar: ${result.error ?: "verifică internetul"}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 
     // =========================================================================
@@ -831,7 +1037,8 @@ class MainActivity : AppCompatActivity() {
             shootingSession = chkShooting.isChecked,
             securityCommittee = chkSecurityCommittee.isChecked,
             pnsaExemptions = chkPnsaExemptions.isChecked,
-            prohibitedItems = readProhibitedItems()
+            prohibitedItems = readProhibitedItems(),
+            otherNotes = etReportOtherNotes.text?.toString()?.trim().orEmpty()
         )
     }
 
@@ -1082,6 +1289,19 @@ class MainActivity : AppCompatActivity() {
                 launch {
                     FlightRepository.snapshot.collect { snap ->
                         radarView.updateAircraft(snap.activeAircraft)
+                        val selHex = selectedAircraftHex
+                        if (selHex != null) {
+                            val updatedAc = snap.activeAircraft.firstOrNull { it.hex == selHex }
+                            if (updatedAc != null) {
+                                val loading = selectedAircraftDetails == null &&
+                                    selectedAircraftDetailsJob?.isActive == true
+                                renderSelectedAircraftPanel(updatedAc, selectedAircraftDetails, loading)
+                            } else {
+                                selectedAircraftHex = null
+                                selectedAircraftDetails = null
+                                tvSelectedAircraft.visibility = View.GONE
+                            }
+                        }
                         val updated = snap.updatedAtMs?.let { clockFmt.format(Date(it)) } ?: "—"
                         tvStatus.text = when {
                             snap.providerOk -> "Live (${snap.provider}) • ${snap.activeAircraft.size} pe radar • $updated"
@@ -1091,12 +1311,23 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         val activeEmergencies = snap.activeAircraft.filter {
-                            it.phase == "emergency" || AirportConfig.emergencyDescription(it.squawk) != null
+                            it.phase == "emergency" ||
+                                it.phase == "emergency_pan" ||
+                                AirportConfig.emergencyInfo(it.squawk, it.emergencyStatus) != null
                         }
                         if (activeEmergencies.isNotEmpty()) {
+                            val hasCritical = activeEmergencies.any { ac ->
+                                val info = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
+                                info != null && info.code != "PAN"
+                            }
+                            tvEmergencyBanner.setBackgroundColor(
+                                Color.parseColor(if (hasCritical) "#DC2626" else "#EA580C")
+                            )
                             tvEmergencyBanner.text = activeEmergencies.joinToString("\n") { ac ->
-                                val desc = AirportConfig.emergencyDescription(ac.squawk) ?: "COD URGENȚĂ ${ac.squawk}"
-                                "ALERTĂ URGENȚĂ: ${ac.callsign} • $desc • ${ac.distKm} km de LRCK (${ac.altAglFt ?: "—"} ft)"
+                                val info = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
+                                val prefix = if (info?.code == "PAN") "ALERTĂ PAN-PAN" else "ALERTĂ URGENȚĂ"
+                                val desc = info?.description ?: "COD URGENȚĂ ${ac.squawk}"
+                                "$prefix: ${ac.callsign} • $desc • ${ac.distKm} km de LRCK (${ac.altAglFt ?: "—"} ft)"
                             }
                             tvEmergencyBanner.visibility = View.VISIBLE
                         } else {
@@ -1110,6 +1341,7 @@ class MainActivity : AppCompatActivity() {
                         val recent = list.take(5)
                         recentAdapter.submitList(recent)
                         tvEmptyRecent.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+                        btnDeleteAllSim.visibility = if (list.any { it.simulated }) View.VISIBLE else View.GONE
                         val landings = list.count { it.type == FlightEventType.LANDING }
                         val takeoffs = list.count { it.type == FlightEventType.TAKEOFF }
                         val emergencies = list.count { it.type == FlightEventType.EMERGENCY }

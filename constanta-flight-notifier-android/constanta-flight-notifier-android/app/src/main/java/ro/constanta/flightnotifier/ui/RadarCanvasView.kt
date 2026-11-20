@@ -419,8 +419,13 @@ class RadarCanvasView @JvmOverloads constructor(
         // 7. Aeronave live, trasee și etichete tip HUD
         screenPositions.clear()
         for (ac in aircraft) {
-            val isEmergency = ac.phase == "emergency" || AirportConfig.emergencyDescription(ac.squawk) != null
-            val col = if (isEmergency) Color.parseColor("#EF4444") else phaseColor(ac.phase)
+            val emInfo = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
+            val isEmergency = emInfo != null || ac.phase == "emergency" || ac.phase == "emergency_pan"
+            val col = when {
+                emInfo?.code == "PAN" || ac.phase == "emergency_pan" -> Color.parseColor("#F97316")
+                isEmergency -> Color.parseColor("#EF4444")
+                else -> phaseColor(ac.phase)
+            }
 
             if (ac.trail.size > 1) {
                 trailPaint.color = Color.argb(175, Color.red(col), Color.green(col), Color.blue(col))
@@ -435,7 +440,7 @@ class RadarCanvasView @JvmOverloads constructor(
             val (px, py) = project(ac.lat, ac.lon, cx, cy, n, centerWx, centerWy, scaleFactor)
             screenPositions[ac.hex] = px to py
 
-            // Halo luminos discret (pulsant roșu pentru cod de urgență!)
+            // Halo luminos discret (pulsant pentru cod de urgență / PAN!)
             val haloRadius = if (isEmergency) 26f + 8f * sin(Math.toRadians((sweepAngleDeg * 4f).toDouble())).toFloat() else 22f
             aircraftHaloPaint.color = Color.argb(if (isEmergency) 125 else 72, Color.red(col), Color.green(col), Color.blue(col))
             canvas.drawCircle(px, py, haloRadius, aircraftHaloPaint)
@@ -453,7 +458,7 @@ class RadarCanvasView @JvmOverloads constructor(
             canvas.restore()
 
             // Etichetă lizibilă (pill semi-transparent) deasupra imaginii satelit
-            val line1 = if (isEmergency && ac.squawk.isNotBlank()) "${ac.squawk} ${ac.callsign}" else ac.callsign
+            val line1 = if (emInfo != null) "${emInfo.shortBadge} ${ac.callsign}" else ac.callsign
             val altStr = if (ac.onGround) "SOL" else "${ac.altAglFt ?: "—"}ft"
             val gsStr = ac.gsKt?.let { "${it}kt" } ?: ""
             val line2 = "$altStr $gsStr".trim()

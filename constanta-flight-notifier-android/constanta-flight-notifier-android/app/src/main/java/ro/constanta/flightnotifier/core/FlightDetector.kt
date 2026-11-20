@@ -37,6 +37,7 @@ class FlightDetector {
         var registration: String,
         var aircraftType: String,
         var squawk: String,
+        var emergencyStatus: String,
         var simulated: Boolean,
         var airlineHint: String?,
         var routeHint: String?,
@@ -71,6 +72,7 @@ class FlightDetector {
             val onGround = computeOnGround(raw, altAglFt)
             val callsign = raw.callsign.trim().uppercase()
             val squawk = raw.squawk.trim()
+            val emStatus = raw.emergencyStatus.trim()
 
             val sample = Sample(
                 ts = nowMs,
@@ -92,6 +94,7 @@ class FlightDetector {
                     registration = raw.registration,
                     aircraftType = raw.aircraftType,
                     squawk = squawk,
+                    emergencyStatus = emStatus,
                     simulated = raw.simulated,
                     airlineHint = raw.airlineHint,
                     routeHint = raw.routeHint,
@@ -103,6 +106,7 @@ class FlightDetector {
                 if (raw.registration.isNotEmpty()) existing.registration = raw.registration
                 if (raw.aircraftType.isNotEmpty()) existing.aircraftType = raw.aircraftType
                 if (squawk.isNotEmpty()) existing.squawk = squawk
+                if (emStatus.isNotEmpty()) existing.emergencyStatus = emStatus
                 if (raw.simulated) existing.simulated = true
                 if (raw.airlineHint != null) existing.airlineHint = raw.airlineHint
                 if (raw.routeHint != null) existing.routeHint = raw.routeHint
@@ -230,20 +234,20 @@ class FlightDetector {
                 }
             }
 
-            // 3. CODURI DE URGENȚĂ (7700 / 7600 / 7500) — zboruri CND + rază 100 km
-            val emergencyDesc = AirportConfig.emergencyDescription(track.squawk)
-            if (emergencyDesc != null && (distKm <= AirportConfig.EMERGENCY_RADIUS_KM || track.cndRelated)) {
-                val reason = if (track.cndRelated) "cnd_flight_squawk_${track.squawk}" else "radius_100km_squawk_${track.squawk}"
+            // 3. CODURI DE URGENȚĂ (7700 / PAN-PAN / 7600 / 7500) — zboruri CND + rază 100 km
+            val emInfo = AirportConfig.emergencyInfo(track.squawk, track.emergencyStatus)
+            if (emInfo != null && (distKm <= AirportConfig.EMERGENCY_RADIUS_KM || track.cndRelated)) {
+                val reason = if (track.cndRelated) "cnd_flight_emg_${emInfo.code}" else "radius_100km_emg_${emInfo.code}"
                 emitEvent(
                     FlightEventType.EMERGENCY,
                     track,
                     nowMs,
                     reason,
-                    emergencyDesc = emergencyDesc
+                    emergencyInfo = emInfo
                 )?.let {
                     emitted.add(it)
                 }
-                track.phase = "emergency"
+                track.phase = if (emInfo.code == "PAN") "emergency_pan" else "emergency"
             } else if (onGround && distKm <= AirportConfig.AIRPORT_ZONE_KM) {
                 if (track.phase != "landed") track.phase = "ground"
             } else if (track.phase != "departing" && track.phase != "approaching") {
@@ -292,6 +296,7 @@ class FlightDetector {
                     registration = t.registration,
                     aircraftType = t.aircraftType,
                     squawk = t.squawk,
+                    emergencyStatus = t.emergencyStatus,
                     phase = t.phase,
                     simulated = t.simulated,
                     lat = t.latest.lat,
@@ -304,7 +309,9 @@ class FlightDetector {
                     verticalRateFpm = t.latest.verticalRateFpm,
                     runway = inferRunway(t.latest.trackDeg, t.latest.lat),
                     trail = t.history.map { it.lat to it.lon },
-                    lastSeenMs = t.lastSeenMs
+                    lastSeenMs = t.lastSeenMs,
+                    airlineHint = t.airlineHint,
+                    routeHint = t.routeHint
                 )
             }
             .sortedBy { it.distKm }
@@ -317,10 +324,10 @@ class FlightDetector {
         track: TrackState,
         nowMs: Long,
         reason: String,
-        emergencyDesc: String? = null
+        emergencyInfo: EmergencyInfo? = null
     ): FlightEvent? {
         val key = if (type == FlightEventType.EMERGENCY) {
-            "${track.hex}:EMERGENCY:${track.squawk}"
+            "${track.hex}:EMERGENCY:${emergencyInfo?.code ?: track.squawk}"
         } else {
             "${track.hex}:${type.name}"
         }
@@ -353,7 +360,8 @@ class FlightDetector {
             detectionReason = reason,
             simulated = track.simulated,
             squawk = track.squawk.ifEmpty { null },
-            emergencyLabel = emergencyDesc
+            emergencyCode = emergencyInfo?.code,
+            emergencyLabel = emergencyInfo?.description
         )
     }
 

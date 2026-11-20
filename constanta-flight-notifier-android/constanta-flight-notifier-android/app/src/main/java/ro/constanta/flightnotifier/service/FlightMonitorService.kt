@@ -127,15 +127,27 @@ class FlightMonitorService : Service() {
         }
     }
 
+    @Volatile
+    private var backfillInProgress = false
+
     private fun pollOnce() {
         val settings = FlightRepository.settings.value
-        val effectiveRadiusNm = if (settings.notifyEmergency) {
+        val effectiveRadiusNm = if (settings.anyEmergencyEnabled) {
             maxOf(settings.pollRadiusNm, ro.constanta.flightnotifier.core.AirportConfig.EMERGENCY_POLL_RADIUS_NM)
         } else {
             settings.pollRadiusNm
         }
         val result = AdsbClient.fetchLiveAircraft(effectiveRadiusNm)
+        val nowMs = System.currentTimeMillis()
         if (result.ok) {
+            val prevOnlineMs = FlightRepository.getLastOnlineSyncMs()
+            FlightRepository.setLastOnlineSyncMs(nowMs)
+
+            // Dacă telefonul a fost offline >= 10 minute, recuperează automat zborurile ratate din OpenSky
+            if (prevOnlineMs > 0L && nowMs - prevOnlineMs >= 10 * 60_000L && !backfillInProgress) {
+                triggerAutoBackfill(prevOnlineMs, nowMs)
+            }
+
             lastLiveAircraft = result.aircraft
             lastProvider = result.provider
             lastProviderOk = true
@@ -144,7 +156,24 @@ class FlightMonitorService : Service() {
             lastProviderOk = false
             lastProviderError = result.error
         }
-        processCombinedTraffic(System.currentTimeMillis())
+        processCombinedTraffic(nowMs)
+    }
+
+    private fun triggerAutoBackfill(fromMs: Long, toMs: Long) {
+        backfillInProgress = true
+        scope.launch {
+            try {
+                val res = AdsbClient.fetchMissedFlightsFromOpenSky(fromMs / 1000L, toMs / 1000L)
+                if (res.ok && res.events.isNotEmpty()) {
+                    val added = FlightRepository.mergeRecoveredEvents(res.events)
+                    if (added > 0) {
+                        NotificationHelper.notifyBackfillRecovered(this@FlightMonitorService, added)
+                    }
+                }
+            } finally {
+                backfillInProgress = false
+            }
+        }
     }
 
     private fun processCombinedTraffic(nowMs: Long) {
@@ -178,7 +207,13 @@ class FlightMonitorService : Service() {
                 FlightEventType.LANDING -> settings.notifyLanding
                 FlightEventType.TAKEOFF -> settings.notifyTakeoff
                 FlightEventType.APPROACH -> settings.notifyApproach
-                FlightEventType.EMERGENCY -> settings.notifyEmergency
+                FlightEventType.EMERGENCY -> when (rawEvt.emergencyCode ?: rawEvt.squawk) {
+                    "7700" -> settings.notifyEmergency7700
+                    "PAN" -> settings.notifyEmergencyPan
+                    "7600" -> settings.notifyEmergency7600
+                    "7500" -> settings.notifyEmergency7500
+                    else -> settings.anyEmergencyEnabled
+                }
             }
             if (!shouldNotify) continue
 

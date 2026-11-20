@@ -130,11 +130,15 @@ object NotificationHelper {
             if (!granted) return
         }
 
+        val emCode = event.emergencyCode ?: event.squawk ?: ""
         val (channelId, titlePrefix) = when (event.type) {
             FlightEventType.LANDING -> CHANNEL_LANDING to "Aterizare la Constanța (CND)"
             FlightEventType.TAKEOFF -> CHANNEL_TAKEOFF to "Decolare de la Constanța (CND)"
             FlightEventType.APPROACH -> CHANNEL_APPROACH to "Apropiere finală spre Constanța"
-            FlightEventType.EMERGENCY -> CHANNEL_EMERGENCY to "ALERTĂ URGENȚĂ SQUAWK ${event.squawk ?: ""}"
+            FlightEventType.EMERGENCY -> CHANNEL_EMERGENCY to (
+                if (emCode == "PAN") "ALERTĂ URGENȚĂ PAN-PAN"
+                else "ALERTĂ URGENȚĂ COD $emCode"
+            )
         }
 
         val simTag = if (event.simulated) " [TEST]" else ""
@@ -144,7 +148,7 @@ object NotificationHelper {
         val summaryLine = if (event.type == FlightEventType.EMERGENCY) {
             listOfNotNull(
                 event.callsign,
-                event.emergencyLabel ?: "Squawk ${event.squawk}",
+                event.emergencyLabel ?: "Urgență $emCode",
                 "${event.distKm} km de LRCK"
             ).joinToString(" • ")
         } else {
@@ -158,7 +162,7 @@ object NotificationHelper {
 
         val bigText = buildString {
             if (event.type == FlightEventType.EMERGENCY && !event.emergencyLabel.isNullOrBlank()) {
-                append("COD URGENȚĂ: ${event.emergencyLabel}\n")
+                append("URGENT: ${event.emergencyLabel}\n")
             }
             append("Indicativ: ${event.callsign}")
             if (!event.airline.isNullOrBlank()) append("\nOperator: ${event.airline}")
@@ -206,10 +210,38 @@ object NotificationHelper {
             .addAction(0, "Vezi pe hartă", mapIntent)
 
         if (event.type == FlightEventType.EMERGENCY) {
-            builder.setColor(Color.parseColor("#DC2626"))
+            builder.setColor(
+                if (emCode == "PAN") Color.parseColor("#EA580C")
+                else Color.parseColor("#DC2626")
+            )
         }
 
         alertIdCounter += 2
         NotificationManagerCompat.from(context).notify(alertIdCounter, builder.build())
+    }
+
+    fun notifyBackfillRecovered(context: Context, count: Int) {
+        if (count <= 0) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) return
+        }
+        val openIntent = PendingIntent.getActivity(
+            context,
+            9001,
+            Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notif = NotificationCompat.Builder(context, CHANNEL_APPROACH)
+            .setSmallIcon(R.drawable.ic_plane_notif)
+            .setContentTitle("SAT CND — Zboruri recuperate după reconectare")
+            .setContentText("Au fost adăugate $count zboruri din perioada offline (OpenSky) în Istoric și Raport.")
+            .setAutoCancel(true)
+            .setContentIntent(openIntent)
+            .build()
+        NotificationManagerCompat.from(context).notify(9001, notif)
     }
 }

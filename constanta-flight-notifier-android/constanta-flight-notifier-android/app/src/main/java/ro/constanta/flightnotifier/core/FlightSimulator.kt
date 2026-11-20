@@ -35,8 +35,7 @@ class FlightSimulator {
         val f = fleet[seq % fleet.size]
         val rwy = if (runway == "36") "36" else "18"
         val normalizedKind = when (kind) {
-            "takeoff" -> "takeoff"
-            "emergency" -> "emergency"
+            "takeoff", "emergency", "emergency_7700", "emergency_pan", "emergency_7600", "emergency_7500" -> kind
             else -> "landing"
         }
         val route = if (normalizedKind == "takeoff") f[4].split(" → ").reversed().joinToString(" → ") else f[4]
@@ -67,18 +66,24 @@ class FlightSimulator {
             val track = if (s.runway == "18") 182 else 2
 
             when (s.kind) {
-                "emergency" -> {
-                    // Aeronavă la ~38 km NV de LRCK cu cod de urgență 7700 în coborâre spre Constanța
+                "emergency", "emergency_7700", "emergency_pan", "emergency_7600", "emergency_7500" -> {
                     val distKm = 38.0 - p * 22.0
                     val lat = AirportConfig.LAT + (distKm * 0.72) / 111.1
                     val lon = AirportConfig.LON - (distKm * 0.69) / 79.6
                     val altAgl = (11500.0 - p * 5500.0).roundToInt()
+                    val (sq, emStatus) = when (s.kind) {
+                        "emergency_pan" -> "2412" to "lifeguard"
+                        "emergency_7600" -> "7600" to "nordo"
+                        "emergency_7500" -> "7500" to "unlawful"
+                        else -> "7700" to "general"
+                    }
                     RawAircraft(
                         hex = s.hex,
                         callsign = s.callsign,
                         registration = s.registration,
                         aircraftType = s.aircraftType,
-                        squawk = "7700",
+                        squawk = sq,
+                        emergencyStatus = emStatus,
                         lat = lat,
                         lon = lon,
                         altBaroFt = AirportConfig.ELEVATION_FT + altAgl,

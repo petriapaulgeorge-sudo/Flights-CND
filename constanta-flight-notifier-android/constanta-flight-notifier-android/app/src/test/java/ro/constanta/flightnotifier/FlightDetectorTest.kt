@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import ro.constanta.flightnotifier.core.AdsbClient
 import ro.constanta.flightnotifier.core.AirportConfig
 import ro.constanta.flightnotifier.core.DailyReportBuilder
 import ro.constanta.flightnotifier.core.EventSearch
@@ -166,6 +167,125 @@ class FlightDetectorTest {
         assertEquals(1, emergencies.size)
         assertEquals("BAW881", emergencies.first().callsign)
         assertEquals("7700", emergencies.first().squawk)
+        assertEquals("7700", emergencies.first().emergencyCode)
+    }
+
+    @Test
+    fun detectsPanPanLifeguardMinFuelAnd7600And7500Within100Km() {
+        val detector = FlightDetector()
+        val t0 = 1_700_000_000_000L
+
+        val res = detector.processSnapshot(
+            listOf(
+                RawAircraft(
+                    hex = "4a0pan",
+                    callsign = "SMURD1",
+                    squawk = "2341",
+                    emergencyStatus = "lifeguard",
+                    lat = AirportConfig.LAT + 0.25, // ~28 km
+                    lon = AirportConfig.LON,
+                    altBaroFt = 8_500,
+                    onGround = false,
+                    gsKt = 240,
+                    trackDeg = 180,
+                    verticalRateFpm = -600
+                ),
+                RawAircraft(
+                    hex = "4a7600",
+                    callsign = "TAR760",
+                    squawk = "7600",
+                    lat = AirportConfig.LAT + 0.30, // ~33 km
+                    lon = AirportConfig.LON,
+                    altBaroFt = 14_000,
+                    onGround = false,
+                    gsKt = 290,
+                    trackDeg = 180,
+                    verticalRateFpm = 0
+                ),
+                RawAircraft(
+                    hex = "4a7500",
+                    callsign = "TEST75",
+                    squawk = "7500",
+                    lat = AirportConfig.LAT - 0.35, // ~39 km
+                    lon = AirportConfig.LON,
+                    altBaroFt = 18_000,
+                    onGround = false,
+                    gsKt = 360,
+                    trackDeg = 10,
+                    verticalRateFpm = 0
+                )
+            ),
+            t0
+        )
+
+        val emergencies = res.events.filter { it.type == FlightEventType.EMERGENCY }
+        assertEquals(3, emergencies.size)
+        assertEquals("PAN", emergencies.first { it.callsign == "SMURD1" }.emergencyCode)
+        assertEquals("7600", emergencies.first { it.callsign == "TAR760" }.emergencyCode)
+        assertEquals("7500", emergencies.first { it.callsign == "TEST75" }.emergencyCode)
+        assertEquals("emergency_pan", res.activeAircraft.first { it.callsign == "SMURD1" }.phase)
+        assertEquals("PAN", AirportConfig.emergencyInfo("2000", "minfuel")?.code)
+    }
+
+    @Test
+    fun parsesOpenSkyMissedFlightsJson() {
+        val sampleJson = """
+            [
+              {
+                "icao24": "4ba999",
+                "firstSeen": 1700001000,
+                "estDepartureAirport": "LTFM",
+                "lastSeen": 1700004600,
+                "estArrivalAirport": "LRCK",
+                "callsign": "THY1048 "
+              }
+            ]
+        """.trimIndent()
+        val parsed = AdsbClient.parseOpenSkyFlightsJson(sampleJson, FlightEventType.LANDING)
+        assertEquals(1, parsed.size)
+        val evt = parsed.first()
+        assertEquals("THY1048", evt.callsign)
+        assertEquals("4ba999", evt.hex)
+        assertEquals(1700004600L * 1000L, evt.timestampMs)
+        assertEquals("LTFM → LRCK", evt.route)
+        assertEquals("opensky_backfill", evt.detectionReason)
+    }
+
+    @Test
+    fun parsesAdsbdbFlightRouteAndResolvesAirlineAndAirports() {
+        val sampleJson = """
+            {
+              "response": {
+                "flightroute": {
+                  "callsign": "THY1048",
+                  "airline": { "name": "Turkish Airlines" },
+                  "origin": {
+                    "name": "Istanbul Airport",
+                    "iata_code": "IST",
+                    "icao_code": "LTFM",
+                    "municipality": "Istanbul",
+                    "country_name": "Turkey"
+                  },
+                  "destination": {
+                    "name": "Mihail Kogălniceanu International Airport",
+                    "iata_code": "CND",
+                    "icao_code": "LRCK",
+                    "municipality": "Constanța",
+                    "country_name": "Romania"
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+
+        val parsed = AdsbClient.parseAdsbdbFlightRouteJson(sampleJson)
+        assertEquals("Turkish Airlines", parsed?.airline)
+        assertTrue(parsed?.origin?.contains("Istanbul Airport") == true)
+        assertTrue(parsed?.origin?.contains("IST / LTFM") == true)
+        assertTrue(parsed?.destination?.contains("CND / LRCK") == true)
+        assertTrue(parsed?.destination?.contains("Constanța") == true)
+        assertEquals("Wizz Air", AdsbClient.resolveKnownAirline("WZZ3128"))
+        assertTrue(AdsbClient.resolveKnownAirport("LTN").contains("Londra Luton"))
     }
 
     @Test

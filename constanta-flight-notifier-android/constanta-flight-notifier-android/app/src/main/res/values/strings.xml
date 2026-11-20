@@ -16,22 +16,34 @@
     <string name="zoom_25">25 km</string>
     <string name="zoom_45">45 km</string>
     <string name="zoom_100">100 km</string>
-    <string name="radar_legend">Verde: Ateriz.  •  Albastru: Decol.  •  Galben: Sol  •  Roșu: Urgență</string>
+    <string name="radar_legend">Verde: Ateriz. • Albastru: Decol. • Portocaliu: PAN • Roșu: Urgență</string>
 
     <string name="btn_start_monitor">Pornește monitorizarea 24/7</string>
     <string name="btn_stop_monitor">Oprește monitorizarea</string>
     <string name="btn_sim_landing">Sim. aterizare (18)</string>
     <string name="btn_sim_takeoff">Sim. decolare (36)</string>
-    <string name="btn_sim_emergency">Sim. urgență 7700</string>
+    <string name="btn_sim_emergency">Simulează urgență (7700 / PAN / 7600 / 7500)</string>
 
-    <string name="section_alerts">Notificări active</string>
+    <string name="section_alerts">Notificări trafic &amp; urgențe</string>
     <string name="opt_notify_landing">Notifică la aterizări pe LRCK</string>
     <string name="opt_notify_takeoff">Notifică la decolări de pe LRCK</string>
     <string name="opt_notify_approach">Alertă timpurie la apropiere finală (&lt; 12 km)</string>
-    <string name="opt_notify_emergency">Coduri de urgență 7700 / 7600 / 7500 (CND + rază 100 km)</string>
+
+    <string name="section_emergency_codes">Alerte coduri de urgență (zboruri CND + rază 100 km)</string>
+    <string name="opt_emg_7700">Cod 7700 — MAYDAY (Urgență generală)</string>
+    <string name="desc_emg_7700">Pericol grav și iminent la bord; aeronava solicită prioritate absolută și asistență imediată.</string>
+    <string name="opt_emg_pan">PAN-PAN (Urgență medicală / Combustibil minim)</string>
+    <string name="desc_emg_pan">Situație urgentă fără pericol imediat de viață (ex. MEDEVAC/LIFEGUARD, combustibil minim MINFUEL, defecțiune).</string>
+    <string name="opt_emg_7600">Cod 7600 — Pierdere comunicații radio (NORDO)</string>
+    <string name="desc_emg_7600">Defecțiune a stațiilor radio; aeronava nu poate comunica cu controlul de trafic aerian.</string>
+    <string name="opt_emg_7500">Cod 7500 — Intervenție ilegală (HIJACK)</string>
+    <string name="desc_emg_7500">Deturnare sau act de intervenție ilicită la bordul aeronavei.</string>
 
     <string name="section_recent">Ultimele evenimente</string>
     <string name="btn_open_history">Vezi tot istoricul</string>
+    <string name="btn_sync_missed">Sincronizează zboruri ratate (offline)</string>
+    <string name="btn_delete_selected_sim">Șterge simulate selectate</string>
+    <string name="btn_delete_all_sim">Șterge toate simulatele</string>
 
     <!-- Stare pistă -->
     <string name="runway_specs_title">Date fizice pistă — LRCK (18/36)</string>
@@ -47,7 +59,7 @@
 
     <!-- Istoric & Căutare -->
     <string name="section_search_title">Căutare &amp; filtrare zboruri</string>
-    <string name="hint_search_query">Caută indicativ, squawk 7700, companie, aeronavă, rută…</string>
+    <string name="hint_search_query">Caută indicativ, 7700/PAN, companie, aeronavă, rută…</string>
     <string name="filter_all">Toate</string>
     <string name="filter_landings">Aterizări</string>
     <string name="filter_takeoffs">Decolări</string>
@@ -66,7 +78,7 @@
     <string name="btn_export_pdf">Exportă PDF</string>
     <string name="btn_clear">Golește istoricul</string>
 
-    <string name="empty_events">Nu există încă evenimente. Apasă „Sim. aterizare” sau „Sim. urgență 7700” pentru test.</string>
+    <string name="empty_events">Nu există încă evenimente. Apasă „Sim. aterizare” sau „Simulează urgență” pentru test.</string>
     <string name="empty_search_results">Niciun zbor nu corespunde intervalului sau filtrelor selectate.</string>
 
     <!-- Raport zilnic -->
@@ -97,15 +109,18 @@
     <string name="proh_blunt">Contondente</string>
     <string name="proh_explosives">Explozive / Incendiare</string>
 
+    <string name="report_other_notes_title">Alte date de interes</string>
+    <string name="hint_report_other_notes">Introduceți observații suplimentare, evenimente speciale, echipe, mențiuni pentru schimbul de tură…</string>
+
     <string name="btn_generate_daily_pdf">Generează PDF</string>
     <string name="btn_share_daily_pdf">Share WhatsApp / Email</string>
 
     <!-- Despre -->
-    <string name="about_app_version">Versiunea 1.4.0 • Android</string>
+    <string name="about_app_version">Versiunea 1.5.0 • Android</string>
     <string name="about_desc_title">Descrierea aplicației</string>
-    <string name="about_desc_body">SAT - Monitorizare trafic CND este o aplicație dedicată monitorizării în timp real a traficului aerian și condițiilor de pistă ale Aeroportului Internațional „Mihail Kogălniceanu” Constanța (IATA: CND / ICAO: LRCK, Pista 18/36, 44.3622°N, 28.4883°E, elevație 353 ft).\n\nAplicația rulează un serviciu continuu în fundal (24/7) care analizează datele ADS-B live și trimite notificări instantanee pentru aterizări, decolări și coduri de urgență (7700 / 7600 / 7500 pentru zborurile CND și pe o rază de 100 km). Include hartă satelit cu radar tactic, secțiune dedicată de stare a pistei (METAR/TAF live, componente de vânt, RWYCC), istoric cu căutare pe intervale și modul de generare a rapoartelor zilnice PDF cu partajare directă.</string>
+    <string name="about_desc_body">SAT - Monitorizare trafic CND este o aplicație dedicată monitorizării în timp real a traficului aerian și condițiilor de pistă ale Aeroportului Internațional „Mihail Kogălniceanu” Constanța (IATA: CND / ICAO: LRCK, Pista 18/36, 44.3622°N, 28.4883°E, elevație 353 ft).\n\nAplicația rulează un serviciu continuu în fundal (24/7), recuperează automat zborurile din perioadele offline prin OpenSky, trimite notificări pentru aterizări, decolări și coduri de urgență (7700, PAN-PAN, 7600, 7500 — CND + rază 100 km), afișează traficul pe hartă satelit cu radar tactic, monitorizează starea pistei (METAR/TAF/RWYCC) și generează rapoarte zilnice PDF cu partajare directă pe WhatsApp/Email.</string>
     <string name="about_features_title">Funcționalități principale</string>
-    <string name="about_features_body">• Hartă satelit cu radar tactic live pe Pista 18/36 (zoom 15 / 25 / 45 / 100 km)\n• Alerte pentru aterizări, decolări, apropiere finală și coduri de urgență (7700 / 7600 / 7500 — CND + rază 100 km)\n• Secțiune Stare pistă: METAR/TAF live LRCK, pistă recomandată de vânt, stare estimată suprafață, risc polei și evaluare locală RWYCC\n• Istoric persistent (2.000 evenimente), căutare pe zile/ore și export .pdf\n• Generator de rapoarte zilnice (Turkish Airlines &amp; Wizz Air, supervizor, articole interzise) cu export .pdf și share WhatsApp / Email</string>
+    <string name="about_features_body">• Hartă satelit cu radar tactic live pe Pista 18/36 (zoom 15 / 25 / 45 / 100 km)\n• Switch individual cu descriere pentru fiecare tip de urgență: 7700, PAN-PAN, 7600, 7500 (CND + rază 100 km)\n• Recuperare automată a zborurilor ratate la reconectare (OpenSky) + sincronizare manuală\n• Stare pistă: METAR/TAF live LRCK, pistă recomandată de vânt, risc polei și evaluare RWYCC\n• Istoric (2.000 evenimente), ștergere selectivă a zborurilor simulate, căutare pe zile/ore și export .pdf\n• Raport zilnic (Turkish Airlines &amp; Wizz Air, supervizor, articole interzise, Alte date de interes) cu export .pdf și share WhatsApp / Email</string>
     <string name="about_ip_title">Proprietate intelectuală</string>
     <string name="about_ip_notice">Drept de proprietate intelectuală P. G. Petria.</string>
     <string name="about_disclaimer">Notă: Aplicația are scop strict informativ și utilizează semnale ADS-B comunitare și date meteo publice METAR/TAF. Nu este destinată navigației aeriene sau utilizării operaționale.</string>

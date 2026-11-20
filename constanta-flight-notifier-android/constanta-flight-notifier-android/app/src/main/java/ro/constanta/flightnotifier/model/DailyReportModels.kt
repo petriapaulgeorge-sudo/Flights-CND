@@ -34,5 +34,6 @@ data class DailyReportData(
     val shootingSession: Boolean,
     val securityCommittee: Boolean,
     val pnsaExemptions: Boolean,
-    val prohibitedItems: ProhibitedItems
+    val prohibitedItems: ProhibitedItems,
+    val otherNotes: String = ""
 )

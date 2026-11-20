@@ -13,6 +13,7 @@ data class RawAircraft(
     val registration: String = "",
     val aircraftType: String = "",
     val squawk: String = "",
+    val emergencyStatus: String = "",
     val lat: Double,
     val lon: Double,
     val altBaroFt: Int? = null,
@@ -32,6 +33,7 @@ data class ActiveAircraft(
     val registration: String,
     val aircraftType: String,
     val squawk: String = "",
+    val emergencyStatus: String = "",
     val phase: String,
     val simulated: Boolean,
     val lat: Double,
@@ -44,7 +46,9 @@ data class ActiveAircraft(
     val verticalRateFpm: Int?,
     val runway: String,
     val trail: List<Pair<Double, Double>>,
-    val lastSeenMs: Long
+    val lastSeenMs: Long,
+    val airlineHint: String? = null,
+    val routeHint: String? = null
 )
 
 data class FlightEvent(
@@ -64,6 +68,7 @@ data class FlightEvent(
     val detectionReason: String,
     val simulated: Boolean = false,
     val squawk: String? = null,
+    val emergencyCode: String? = null,
     val emergencyLabel: String? = null
 ) {
     val adsbExchangeUrl: String
@@ -83,9 +88,15 @@ data class MonitorSettings(
     val notifyLanding: Boolean = true,
     val notifyTakeoff: Boolean = true,
     val notifyApproach: Boolean = false,
-    val notifyEmergency: Boolean = true,
+    val notifyEmergency7700: Boolean = true,
+    val notifyEmergencyPan: Boolean = true,
+    val notifyEmergency7600: Boolean = true,
+    val notifyEmergency7500: Boolean = true,
     val autoStartOnBoot: Boolean = true
-)
+) {
+    val anyEmergencyEnabled: Boolean
+        get() = notifyEmergency7700 || notifyEmergencyPan || notifyEmergency7600 || notifyEmergency7500
+}
 
 data class FeedSnapshot(
     val updatedAtMs: Long? = null,

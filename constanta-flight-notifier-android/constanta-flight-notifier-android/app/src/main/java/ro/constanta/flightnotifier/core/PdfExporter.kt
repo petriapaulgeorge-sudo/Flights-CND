@@ -122,7 +122,7 @@ object PdfExporter {
                     FlightEventType.LANDING -> "Doar aterizări"
                     FlightEventType.TAKEOFF -> "Doar decolări"
                     FlightEventType.APPROACH -> "Doar apropieri"
-                    FlightEventType.EMERGENCY -> "Doar urgențe (7700/7600/7500)"
+                    FlightEventType.EMERGENCY -> "Doar urgențe (7700/PAN/7600/7500)"
                 }
                 append("  |  Filtru: $tName")
             }
@@ -188,11 +188,15 @@ object PdfExporter {
                 }
 
                 val ty = y + 14.5f
+                val emCode = evt.emergencyCode ?: evt.squawk ?: ""
                 val (typeLbl, typePaint) = when (evt.type) {
                     FlightEventType.LANDING -> "Aterizare" to landingPaint
                     FlightEventType.TAKEOFF -> "Decolare" to takeoffPaint
                     FlightEventType.APPROACH -> "Apropiere" to approachPaint
-                    FlightEventType.EMERGENCY -> "URG ${evt.squawk ?: ""}".trim() to emergencyPaint
+                    FlightEventType.EMERGENCY -> {
+                        val lbl = if (emCode == "PAN") "PAN-PAN" else "URG $emCode".trim()
+                        lbl to emergencyPaint
+                    }
                 }
                 val acInfo = listOfNotNull(evt.aircraftType, evt.airline, evt.registration)
                     .joinToString(" • ")
