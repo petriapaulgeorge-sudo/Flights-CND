@@ -325,7 +325,7 @@ object RunwayStatusClient {
             readTimeout = TIMEOUT_MS
             setRequestProperty("User-Agent", USER_AGENT)
         }
-        try {
+        return try {
             val code = conn.responseCode
             if (code !in 200..299) throw IllegalStateException("HTTP $code")
             BufferedReader(InputStreamReader(conn.inputStream, Charsets.UTF_8)).use { it.readText() }
