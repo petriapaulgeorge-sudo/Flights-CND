@@ -3,5 +3,7 @@
     <base-config cleartextTrafficPermitted="false" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">api.dimap.live</domain>
+        <domain includeSubdomains="false">live.glidernet.org</domain>
+        <domain includeSubdomains="false">ddb.glidernet.org</domain>
     </domain-config>
 </network-security-config>

@@ -27,7 +27,9 @@ data class RawAircraft(
     val airlineHint: String? = null,
     val routeHint: String? = null,
     val military: Boolean = false,
-    val sourceType: String = ""
+    val sourceType: String = "",
+    val generalAviation: Boolean = false,
+    val gaCategory: String = ""
 )
 
 data class ActiveAircraft(
@@ -53,7 +55,9 @@ data class ActiveAircraft(
     val airlineHint: String? = null,
     val routeHint: String? = null,
     val military: Boolean = false,
-    val sourceType: String = ""
+    val sourceType: String = "",
+    val generalAviation: Boolean = false,
+    val gaCategory: String = ""
 )
 
 data class FlightEvent(
@@ -102,6 +106,8 @@ data class MonitorSettings(
     val notifyEmergency7500: Boolean = true,
     val autoStartOnBoot: Boolean = true,
     val flyItalyApiKey: String = DEFAULT_FLYITALY_API_KEY,
+    val openSkyClientId: String = DEFAULT_OPENSKY_CLIENT_ID,
+    val openSkyClientSecret: String = DEFAULT_OPENSKY_CLIENT_SECRET,
     val notifyDroneDobrogea: Boolean = true,
     val droneAlertRadiusKm: Int = 10,
     val dimapApiUrl: String = "https://api.dimap.live/api/polling",
@@ -114,8 +120,13 @@ data class MonitorSettings(
     val hasAnyDroneSourceConfigured: Boolean
         get() = dimapApiUrl.isNotBlank() || ukraineAlarmApiKey.isNotBlank()
 
+    val hasOpenSkyAuth: Boolean
+        get() = openSkyClientId.isNotBlank() && openSkyClientSecret.isNotBlank()
+
     companion object {
         const val DEFAULT_FLYITALY_API_KEY = "fia_wv70-aRHvgorZIA3OG7KO_o_LRlCbl2YqnJm6H-IaQ8"
+        const val DEFAULT_OPENSKY_CLIENT_ID = "petriapaulgeorge@gmail.com-api-client"
+        const val DEFAULT_OPENSKY_CLIENT_SECRET = "2azMq7yL2Be3LGf56YsadVlLGPAqyXA1"
     }
 }
 

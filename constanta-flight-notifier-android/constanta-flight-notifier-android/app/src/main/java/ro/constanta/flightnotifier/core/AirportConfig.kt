@@ -17,6 +17,13 @@ object AirportConfig {
     const val ELEVATION_FT = 353
     const val RUNWAY = "18/36"
 
+    // Aerodrom vecin aviație generală / școală — Tuzla (LRTZ, ~43 km SSE de LRCK)
+    const val TUZLA_ICAO = "LRTZ"
+    const val TUZLA_NAME = "Aerodrom Tuzla (LRTZ)"
+    const val TUZLA_LAT = 43.9842
+    const val TUZLA_LON = 28.6097
+    const val TUZLA_ELEVATION_FT = 164
+
     // Praguri de detecție
     const val AIRPORT_ZONE_KM = 4.8
     const val TAKEOFF_MAX_DIST_KM = 11.5
@@ -38,6 +45,7 @@ object AirportConfig {
     const val GO_AROUND_MIN_CLIMB_RATE_FPM = 600
     const val GO_AROUND_MIN_ALT_GAIN_FT = 220
     const val MIN_AIRBORNE_SPEED_KT = 65
+    const val MIN_AIRBORNE_SPEED_GA_KT = 35
     const val MIN_CLIMB_RATE_FPM = 300
     const val MIN_DESCENT_RATE_FPM = -250
     const val SIGNAL_LOSS_TIMEOUT_MS = 28_000L

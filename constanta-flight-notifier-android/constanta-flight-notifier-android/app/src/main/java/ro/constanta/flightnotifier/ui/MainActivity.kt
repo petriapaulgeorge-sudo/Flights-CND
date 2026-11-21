@@ -67,6 +67,7 @@ import ro.constanta.flightnotifier.core.DailyReportPdfExporter
 import ro.constanta.flightnotifier.core.DobrogeaDroneMonitor
 import ro.constanta.flightnotifier.core.EventSearch
 import ro.constanta.flightnotifier.core.PdfExporter
+import ro.constanta.flightnotifier.core.RomatsaAirspaceClient
 import ro.constanta.flightnotifier.core.RunwayConditions
 import ro.constanta.flightnotifier.core.RunwayOperability
 import ro.constanta.flightnotifier.core.RunwayStatusClient
@@ -81,6 +82,9 @@ import ro.constanta.flightnotifier.model.EventSearchFilter
 import ro.constanta.flightnotifier.model.FlightEvent
 import ro.constanta.flightnotifier.model.FlightEventType
 import ro.constanta.flightnotifier.model.ProhibitedItems
+import ro.constanta.flightnotifier.model.RomatsaAirspaceSnapshot
+import ro.constanta.flightnotifier.model.RomatsaNotice
+import ro.constanta.flightnotifier.model.RomatsaNoticeCategory
 import ro.constanta.flightnotifier.model.SavedDailyReport
 import ro.constanta.flightnotifier.notify.NotificationHelper
 import ro.constanta.flightnotifier.service.FlightMonitorService
@@ -153,6 +157,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnToDate: Button
     private lateinit var btnToTime: Button
     private lateinit var btnSyncMissed: Button
+    private lateinit var tvOpenSkyAuthSummary: TextView
+    private lateinit var tvOpenSkyAuthChevron: TextView
+    private lateinit var bodyOpenSkyAuthAccordion: View
+    private lateinit var etOpenSkyClientId: TextInputEditText
+    private lateinit var etOpenSkyClientSecret: TextInputEditText
+    private lateinit var btnSaveOpenSkyAuth: Button
     private lateinit var btnDeleteHistorySim: Button
     private lateinit var btnDeleteAllSim: Button
 
@@ -186,11 +196,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvDroneStatus: TextView
     private lateinit var webViewDimap: WebView
     private lateinit var tvDroneTargetsList: TextView
+    private lateinit var tvRomatsaStatus: TextView
+    private lateinit var chipGroupRomatsaFilter: ChipGroup
+    private lateinit var tvRomatsaEmpty: TextView
+    private lateinit var romatsaNoticesContainer: LinearLayout
+    private lateinit var btnRomatsaRefresh: Button
     private lateinit var tvDroneAlertsHistory: TextView
     private lateinit var etDimapApiUrl: TextInputEditText
     private lateinit var etDimapApiKey: TextInputEditText
     private lateinit var etUaApiKey: TextInputEditText
     private var dimapWebLoadedOnce = false
+    private var romatsaLoadedOnce = false
+    private var currentRomatsaFilter: Int = R.id.chip_romatsa_all
     private var currentDimapUrl: String = DobrogeaDroneMonitor.DIMAP_LITE_URL
 
     private lateinit var recentAdapter: EventsAdapter
@@ -410,6 +427,12 @@ class MainActivity : AppCompatActivity() {
         btnToDate = pageView(R.id.btn_to_date)
         btnToTime = pageView(R.id.btn_to_time)
         btnSyncMissed = pageView(R.id.btn_sync_missed)
+        tvOpenSkyAuthSummary = pageView(R.id.tv_opensky_auth_summary)
+        tvOpenSkyAuthChevron = pageView(R.id.tv_opensky_auth_chevron)
+        bodyOpenSkyAuthAccordion = pageView(R.id.body_opensky_auth_accordion)
+        etOpenSkyClientId = pageView(R.id.et_opensky_client_id)
+        etOpenSkyClientSecret = pageView(R.id.et_opensky_client_secret)
+        btnSaveOpenSkyAuth = pageView(R.id.btn_save_opensky_auth)
         btnDeleteHistorySim = pageView(R.id.btn_delete_history_sim)
         btnDeleteAllSim = pageView(R.id.btn_delete_all_sim)
 
@@ -441,6 +464,11 @@ class MainActivity : AppCompatActivity() {
         tvDroneStatus = pageView(R.id.tv_drone_status)
         webViewDimap = pageView(R.id.webview_dimap)
         tvDroneTargetsList = pageView(R.id.tv_drone_targets_list)
+        tvRomatsaStatus = pageView(R.id.tv_romatsa_status)
+        chipGroupRomatsaFilter = pageView(R.id.chip_group_romatsa_filter)
+        tvRomatsaEmpty = pageView(R.id.tv_romatsa_empty)
+        romatsaNoticesContainer = pageView(R.id.romatsa_notices_container)
+        btnRomatsaRefresh = pageView(R.id.btn_romatsa_refresh)
         tvDroneAlertsHistory = pageView(R.id.tv_drone_alerts_history)
         etDimapApiUrl = pageView(R.id.et_dimap_api_url)
         etDimapApiKey = pageView(R.id.et_dimap_api_key)
@@ -521,13 +549,18 @@ class MainActivity : AppCompatActivity() {
         if (position == 3) {
             refreshDailyReportFlights(forceRender = false)
         }
-        if (position == TAB_DRONE && !dimapWebLoadedOnce) {
-            dimapWebLoadedOnce = true
-            webViewDimap.loadUrl(currentDimapUrl)
-            if (FlightRepository.settings.value.hasAnyDroneSourceConfigured) {
-                lifecycleScope.launch(Dispatchers.IO) {
-                    FlightMonitorService.pollDronesAndNotify(this@MainActivity)
+        if (position == TAB_DRONE) {
+            if (!dimapWebLoadedOnce) {
+                dimapWebLoadedOnce = true
+                webViewDimap.loadUrl(currentDimapUrl)
+                if (FlightRepository.settings.value.hasAnyDroneSourceConfigured) {
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        FlightMonitorService.pollDronesAndNotify(this@MainActivity)
+                    }
                 }
+            }
+            if (!romatsaLoadedOnce) {
+                refreshRomatsaDobrogeaNotices()
             }
         }
     }
@@ -557,6 +590,11 @@ class MainActivity : AppCompatActivity() {
             R.id.header_history_range_accordion,
             R.id.body_history_range_accordion,
             R.id.tv_history_range_chevron
+        )
+        bindAccordion(
+            R.id.header_opensky_auth_accordion,
+            R.id.body_opensky_auth_accordion,
+            R.id.tv_opensky_auth_chevron
         )
         bindAccordion(
             R.id.header_drone_api_accordion,
@@ -675,6 +713,7 @@ class MainActivity : AppCompatActivity() {
         val alt = if (ac.onGround) "LA SOL" else "${ac.altAglFt ?: "—"} ft AGL"
         val vs = ac.verticalRateFpm?.let { if (it > 0) "+$it fpm" else "$it fpm" } ?: "—"
         val model = details?.aircraftModel?.takeIf { it.isNotBlank() }
+            ?: AdsbClient.resolveKnownAircraftModel(ac.aircraftType)
             ?: ac.aircraftType.ifBlank { ac.hex.uppercase(Locale.US) }
         val reg = details?.registration?.takeIf { it.isNotBlank() }
             ?: ac.registration.takeIf { it.isNotBlank() }
@@ -683,26 +722,70 @@ class MainActivity : AppCompatActivity() {
         val emInfo = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
         val emTag = if (emInfo != null) " • [${emInfo.shortBadge}]" else ""
         val milTag = if (ac.military) " • [MILITAR]" else ""
-        val srcTag = if (ac.sourceType.contains("mlat", ignoreCase = true)) " • MLAT" else ""
+        val gaTag = if (ac.generalAviation && !ac.military) {
+            when (ac.gaCategory) {
+                "ȘCOALĂ" -> " • [GA / ȘCOALĂ]"
+                "ELICOPTER" -> " • [ELICOPTER]"
+                "PLANOR" -> " • [PLANOR]"
+                "ULM" -> " • [ULM]"
+                else -> " • [AVIAȚIE GENERALĂ]"
+            }
+        } else {
+            ""
+        }
+        val srcTag = when {
+            ac.sourceType.contains("ogn", ignoreCase = true) && ac.sourceType.contains("+", ignoreCase = true) ->
+                " • ADS-B+OGN"
+            ac.sourceType.contains("ogn", ignoreCase = true) -> " • OGN/FLARM"
+            ac.sourceType.contains("mlat", ignoreCase = true) -> " • MLAT"
+            ac.sourceType.equals("opensky", ignoreCase = true) -> " • OpenSky"
+            else -> ""
+        }
 
         val airlineText = details?.airline?.takeIf { it.isNotBlank() }
             ?: ac.airlineHint?.takeIf { it.isNotBlank() }
             ?: AdsbClient.resolveKnownAirline(ac.callsign)
-            ?: if (loading) "Se caută…" else if (ac.military) "Aeronavă militară / de stat" else "Indisponibilă în baza ADS-B"
+            ?: AdsbClient.resolveKnownSchoolOrGaOperator(ac.callsign, reg.orEmpty())
+            ?: if (loading) {
+                "Se caută…"
+            } else if (ac.military) {
+                "Aeronavă militară / de stat"
+            } else if (ac.generalAviation) {
+                "Aviație generală / Școală (privat)"
+            } else {
+                "Indisponibilă în baza ADS-B"
+            }
 
-        val noRouteText = if (ac.military) "Zbor militar (rută nepublică)" else "Indisponibilă (fără plan de zbor public)"
+        val distTuzlaKm = (kotlin.math.round(
+            ro.constanta.flightnotifier.core.FlightDetector.haversineKm(
+                ac.lat, ac.lon, AirportConfig.TUZLA_LAT, AirportConfig.TUZLA_LON
+            ) * 10.0
+        ) / 10.0)
+
+        val noRouteText = when {
+            ac.military -> "Zbor militar (rută nepublică)"
+            ac.generalAviation && distTuzlaKm <= 25.0 -> "Zbor VFR / Școală — zonă Aerodrom Tuzla (LRTZ)"
+            ac.generalAviation -> "Zbor VFR / Aviație generală (fără plan comercial)"
+            else -> "Indisponibilă (fără plan de zbor public)"
+        }
         val originText = details?.origin?.takeIf { it.isNotBlank() }
             ?: if (loading) "Se caută…" else noRouteText
 
         val destText = details?.destination?.takeIf { it.isNotBlank() }
             ?: if (loading) "Se caută…" else noRouteText
 
+        val tuzlaSuffix = if (ac.generalAviation && distTuzlaKm <= 35.0) {
+            " • $distTuzlaKm km de Tuzla (LRTZ)"
+        } else {
+            ""
+        }
+
         tvSelectedAircraft.text = buildString {
-            append("${ac.callsign} • $model$regPart$sqStr$milTag$emTag$srcTag\n")
-            append("Companie: $airlineText\n")
+            append("${ac.callsign} • $model$regPart$sqStr$milTag$gaTag$emTag$srcTag\n")
+            append("Operator: $airlineText\n")
             append("Origine: $originText\n")
             append("Destinație: $destText\n")
-            append("Telemetrie: $alt • ${ac.gsKt ?: "—"} kt • V/S $vs • ${ac.distKm} km de LRCK")
+            append("Telemetrie: $alt • ${ac.gsKt ?: "—"} kt • V/S $vs • ${ac.distKm} km de LRCK$tuzlaSuffix")
         }
         tvSelectedAircraft.visibility = View.VISIBLE
     }
@@ -954,7 +1037,7 @@ class MainActivity : AppCompatActivity() {
             val msg = if (key.isNotEmpty()) {
                 "Cheia FlyItalyADSB a fost salvată și va fi inclusă automat în fuziunea radar."
             } else {
-                "Cheia FlyItalyADSB a fost ștearsă (rămân active cele 5 rețele gratuite)."
+                "Cheia FlyItalyADSB a fost ștearsă (rămân active cele 7 surse gratuite ADS-B + OGN + OpenSky)."
             }
             Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
             if (FlightRepository.isMonitoring.value) {
@@ -1137,6 +1220,90 @@ class MainActivity : AppCompatActivity() {
             syncMissedFlightsManually()
         }
 
+        val initSettings = FlightRepository.settings.value
+        etOpenSkyClientId.setText(initSettings.openSkyClientId)
+        etOpenSkyClientSecret.setText(initSettings.openSkyClientSecret)
+        updateOpenSkyAuthSummary()
+
+        pageView<Button>(R.id.btn_open_opensky_portal).setOnClickListener {
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AdsbClient.OPENSKY_ACCOUNT_URL)))
+            }
+        }
+
+        btnSaveOpenSkyAuth.setOnClickListener {
+            val clientId = etOpenSkyClientId.text?.toString()?.trim().orEmpty()
+            val clientSecret = etOpenSkyClientSecret.text?.toString()?.trim().orEmpty()
+
+            if (clientId.isEmpty() && clientSecret.isEmpty()) {
+                AdsbClient.clearOpenSkyTokenCache()
+                FlightRepository.updateSettings(
+                    FlightRepository.settings.value.copy(
+                        openSkyClientId = "",
+                        openSkyClientSecret = ""
+                    )
+                )
+                updateOpenSkyAuthSummary()
+                updateRadarSummaries()
+                Toast.makeText(
+                    this,
+                    "Credențialele OpenSky au fost șterse.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+
+            if (clientId.isEmpty() || clientSecret.isEmpty()) {
+                Toast.makeText(
+                    this,
+                    "Completează atât Client ID, cât și Client Secret din contul OpenSky.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
+
+            FlightRepository.updateSettings(
+                FlightRepository.settings.value.copy(
+                    openSkyClientId = clientId,
+                    openSkyClientSecret = clientSecret
+                )
+            )
+            updateOpenSkyAuthSummary()
+            updateRadarSummaries()
+
+            btnSaveOpenSkyAuth.isEnabled = false
+            btnSaveOpenSkyAuth.text = "Se testează token-ul OAuth2…"
+            lifecycleScope.launch {
+                val testRes = withContext(Dispatchers.IO) {
+                    AdsbClient.testOpenSkyCredentials(clientId, clientSecret)
+                }
+                btnSaveOpenSkyAuth.isEnabled = true
+                btnSaveOpenSkyAuth.text = getString(R.string.btn_save_opensky_auth)
+                if (testRes.isSuccess) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Autentificare OpenSky reușită! Sincronizarea offline și 4.000 credite/zi sunt active.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    bodyOpenSkyAuthAccordion.visibility = View.GONE
+                    tvOpenSkyAuthChevron.text = "▾"
+                    if (FlightRepository.isMonitoring.value) {
+                        startService(
+                            Intent(this@MainActivity, FlightMonitorService::class.java).apply {
+                                action = FlightMonitorService.ACTION_POLL_NOW
+                            }
+                        )
+                    }
+                } else {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Credențiale salvate, dar testul OpenSky a eșuat: ${testRes.exceptionOrNull()?.message ?: "verifică datele"}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+
         btnDeleteHistorySim.setOnClickListener {
             val ids = historyAdapter.getSelectedSimulatedIds()
             val removed = FlightRepository.deleteSimulatedEventsByIds(ids)
@@ -1182,36 +1349,96 @@ class MainActivity : AppCompatActivity() {
         updateIntervalButtons()
     }
 
+    private fun updateOpenSkyAuthSummary() {
+        val s = FlightRepository.settings.value
+        if (s.hasOpenSkyAuth) {
+            tvOpenSkyAuthSummary.text = "Conectat OAuth2 (ultimele 12h fără dubluri + 4.000 credite/zi) ✓"
+            tvOpenSkyAuthSummary.setTextColor(ContextCompat.getColor(this, R.color.secondary))
+        } else {
+            tvOpenSkyAuthSummary.text = getString(R.string.opensky_auth_status_missing)
+            tvOpenSkyAuthSummary.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
+        }
+    }
+
+    private fun showOpenSkyAuthRequiredDialog(reason: String?) {
+        val msg = buildString {
+            if (!reason.isNullOrBlank()) {
+                append("$reason\n\n")
+            }
+            append("De ce a apărut eroarea HTTP 403?\n")
+            append("OpenSky Network nu mai permite preluarea anonimă a zborurilor istorice (/flights/arrival & /flights/departure). Autentificarea este 100% GRATUITĂ prin OAuth2:\n\n")
+            append("1. Deschide contul gratuit pe opensky-network.org/my-opensky/account\n")
+            append("2. Creează un API Client nou și copiază Client ID + Client Secret\n")
+            append("3. Introdu-le în secțiunea „Cont OpenSky” de sub butonul de sincronizare.\n\n")
+            append("Bonus: deblochează automat recuperarea din ultimele 12 ore fără dubluri (replay radar 60 min + arhiva OpenSky 12h) și 4.000 credite/zi pe radarul live.")
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Autentificare gratuită OpenSky necesară")
+            .setMessage(msg)
+            .setPositiveButton("Configurează acum") { _, _ ->
+                bodyOpenSkyAuthAccordion.visibility = View.VISIBLE
+                tvOpenSkyAuthChevron.text = "▴"
+                etOpenSkyClientId.requestFocus()
+            }
+            .setNeutralButton("Deschide OpenSky") { _, _ ->
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AdsbClient.OPENSKY_ACCOUNT_URL)))
+                }
+            }
+            .setNegativeButton("Închide", null)
+            .show()
+    }
+
     private fun syncMissedFlightsManually() {
+        val s = FlightRepository.settings.value
+        if (!s.hasOpenSkyAuth) {
+            showOpenSkyAuthRequiredDialog(
+                "OpenSky necesită acum credențiale gratuite OAuth2 (Client ID & Client Secret) pentru recuperarea zborurilor offline."
+            )
+            return
+        }
+
         btnSyncMissed.isEnabled = false
-        btnSyncMissed.text = "Se sincronizează din OpenSky…"
+        btnSyncMissed.text = "Se sincronizează ultimele 12h (OpenSky)…"
         lifecycleScope.launch {
             val nowMs = System.currentTimeMillis()
             val nowSec = nowMs / 1000L
-            val lastSyncMs = FlightRepository.getLastOnlineSyncMs()
-            val maxLookbackMs = 48L * 3600_000L
-            val defaultLookbackMs = 24L * 3600_000L
-            val beginMs = if (lastSyncMs > 0L && (nowMs - lastSyncMs) in 60_000L..maxLookbackMs) {
-                (lastSyncMs - 10 * 60_000L).coerceAtLeast(nowMs - maxLookbackMs)
-            } else {
-                nowMs - defaultLookbackMs
-            }
+            val lookbackMs = 12L * 3600_000L
+            val beginMs = nowMs - lookbackMs
 
             val result = withContext(Dispatchers.IO) {
-                AdsbClient.fetchMissedFlightsFromOpenSky(beginMs / 1000L, nowSec)
+                AdsbClient.fetchMissedFlightsFromOpenSky(
+                    beginSec = beginMs / 1000L,
+                    endSec = nowSec,
+                    clientId = s.openSkyClientId,
+                    clientSecret = s.openSkyClientSecret,
+                    includeRecentReplay = true,
+                    includeBatchApi = true
+                )
             }
             btnSyncMissed.isEnabled = true
             btnSyncMissed.text = getString(R.string.btn_sync_missed)
 
             if (result.ok) {
-                val added = FlightRepository.mergeRecoveredEvents(result.events)
+                val windowEvents = result.events.filter { it.timestampMs in beginMs..(nowMs + 5 * 60_000L) }
+                val added = FlightRepository.mergeRecoveredEvents(windowEvents)
                 FlightRepository.setLastOnlineSyncMs(nowMs)
-                val msg = if (added > 0) {
-                    "Au fost recuperate $added zboruri din perioada offline (OpenSky)."
-                } else {
-                    "Sincronizare completă: nu au fost găsite zboruri noi de recuperat din OpenSky."
+                val skipped = (windowEvents.size - added).coerceAtLeast(0)
+                val msg = when {
+                    added > 0 && skipped > 0 ->
+                        "Recuperate $added zboruri noi din ultimele 12h ($skipped deja existente — 0 dubluri)."
+                    added > 0 ->
+                        "Recuperate $added zboruri noi din ultimele 12h (OpenSky, 0 dubluri)."
+                    windowEvents.isNotEmpty() ->
+                        "Sincronizare 12h completă: toate cele ${windowEvents.size} zboruri erau deja în istoric (0 dubluri)."
+                    else -> {
+                        val note = result.summaryNote ?: "Verificat ultimele 12h (replay 60 min + arhiva OpenSky)."
+                        "Sincronizare 12h completă: 0 zboruri noi de recuperat. $note"
+                    }
                 }
                 Toast.makeText(this@MainActivity, msg, Toast.LENGTH_LONG).show()
+            } else if (result.needsAuth) {
+                showOpenSkyAuthRequiredDialog(result.error)
             } else {
                 Toast.makeText(
                     this@MainActivity,
@@ -1829,6 +2056,11 @@ class MainActivity : AppCompatActivity() {
                         renderDroneAlertsHistory(alerts)
                     }
                 }
+                launch {
+                    FlightRepository.romatsaSnapshot.collect { romatsaSnap ->
+                        renderRomatsaSnapshot(romatsaSnap, clockFmt)
+                    }
+                }
             }
         }
     }
@@ -1885,14 +2117,18 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val uri = request?.url ?: return false
                 val host = uri.host?.lowercase(Locale.ROOT) ?: ""
-                if (uri.scheme == "https" && (host == "dimap.live" || host.endsWith(".dimap.live"))) {
+                if (uri.scheme == "https" && (
+                        host == "dimap.live" || host.endsWith(".dimap.live") ||
+                        host == "flightplan.romatsa.ro" || host.endsWith(".romatsa.ro")
+                    )
+                ) {
                     return false
                 }
                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
                 return true
             }
         }
-        // Permite pan/zoom fluid pe harta DIMAP fără conflict cu NestedScrollView
+        // Permite pan/zoom fluid pe harta DIMAP / ROMATSA fără conflict cu NestedScrollView
         webViewDimap.setOnTouchListener { v, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE ->
@@ -1913,6 +2149,11 @@ class MainActivity : AppCompatActivity() {
             dimapWebLoadedOnce = true
             webViewDimap.loadUrl(currentDimapUrl)
         }
+        pageView<Button>(R.id.btn_romatsa_map_embed).setOnClickListener {
+            currentDimapUrl = RomatsaAirspaceClient.ROMATSA_DRONES_MAP_URL
+            dimapWebLoadedOnce = true
+            webViewDimap.loadUrl(currentDimapUrl)
+        }
         pageView<Button>(R.id.btn_dimap_reload).setOnClickListener {
             dimapWebLoadedOnce = true
             webViewDimap.loadUrl(currentDimapUrl)
@@ -1921,6 +2162,30 @@ class MainActivity : AppCompatActivity() {
             runCatching {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(currentDimapUrl)))
             }
+        }
+
+        btnRomatsaRefresh.setOnClickListener {
+            refreshRomatsaDobrogeaNotices()
+        }
+        chipGroupRomatsaFilter.setOnCheckedStateChangeListener { _, checkedIds ->
+            currentRomatsaFilter = checkedIds.firstOrNull() ?: R.id.chip_romatsa_all
+            renderRomatsaSnapshot(
+                FlightRepository.romatsaSnapshot.value,
+                SimpleDateFormat("HH:mm:ss", Locale("ro", "RO"))
+            )
+        }
+        pageView<Button>(R.id.btn_open_romatsa_map).setOnClickListener {
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(RomatsaAirspaceClient.ROMATSA_DRONES_MAP_URL)))
+            }
+        }
+        pageView<Button>(R.id.btn_open_mapn_aerofoto).setOnClickListener {
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(RomatsaAirspaceClient.MAPN_AEROFOTO_URL)))
+            }
+        }
+        pageView<Button>(R.id.btn_romatsa_contacts).setOnClickListener {
+            showRomatsaContactsDialog()
         }
 
         pageView<Button>(R.id.btn_drone_poll_now).setOnClickListener {
@@ -2023,10 +2288,11 @@ class MainActivity : AppCompatActivity() {
         val tail = if (activeLabels.isEmpty()) "Toate oprite" else activeLabels.joinToString(", ")
         tvRadarAlertsSummary.text = "$activeFlags/8 active • $tail"
 
+        val openSkyTag = if (s.hasOpenSkyAuth) "OpenSky OAuth2 ✓" else "OpenSky"
         tvRadarSourcesSummary.text = if (s.flyItalyApiKey.isNotBlank()) {
-            "5 rețele gratuite + FlyItalyADSB activ ✓"
+            "7 surse gratuite (ADS-B + OGN + $openSkyTag) + FlyItalyADSB ✓"
         } else {
-            "5 rețele gratuite active (fără FlyItalyADSB)"
+            "7 surse gratuite active (ADS-B + OGN + $openSkyTag)"
         }
     }
 
@@ -2201,6 +2467,211 @@ class MainActivity : AppCompatActivity() {
         }
         tvDroneAlertsHistory.text = text
     }
+
+    private fun refreshRomatsaDobrogeaNotices() {
+        romatsaLoadedOnce = true
+        btnRomatsaRefresh.isEnabled = false
+        btnRomatsaRefresh.text = "Se încarcă…"
+        tvRomatsaStatus.text = getString(R.string.romatsa_loading)
+
+        lifecycleScope.launch {
+            val snap = withContext(Dispatchers.IO) {
+                RomatsaAirspaceClient.fetchDobrogeaAuthorizations()
+            }
+            FlightRepository.updateRomatsaSnapshot(snap)
+            btnRomatsaRefresh.isEnabled = true
+            btnRomatsaRefresh.text = getString(R.string.btn_romatsa_refresh)
+        }
+    }
+
+    private fun renderRomatsaSnapshot(snap: RomatsaAirspaceSnapshot, clockFmt: SimpleDateFormat) {
+        val updatedSuffix = snap.updatedAtMs?.let { " • Actualizat: ${clockFmt.format(Date(it))}" }.orEmpty()
+        tvRomatsaStatus.text = "${snap.statusMessage}$updatedSuffix"
+
+        val allNotices = snap.notices
+        if (snap.updatedAtMs != null) {
+            val uasCount = allNotices.count { it.category == RomatsaNoticeCategory.UAS_DRONE }
+            val restrCount = allNotices.count { it.category == RomatsaNoticeCategory.RESTRICTED_UAS }
+            val mapnCount = allNotices.count {
+                it.category == RomatsaNoticeCategory.DANGER_AREA || it.category == RomatsaNoticeCategory.MAPN_MILITARY
+            }
+            chipGroupRomatsaFilter.findViewById<TextView>(R.id.chip_romatsa_all)?.text =
+                "${getString(R.string.romatsa_filter_all)} (${allNotices.size})"
+            chipGroupRomatsaFilter.findViewById<TextView>(R.id.chip_romatsa_uas)?.text =
+                "${getString(R.string.romatsa_filter_uas)} ($uasCount)"
+            chipGroupRomatsaFilter.findViewById<TextView>(R.id.chip_romatsa_restricted)?.text =
+                "${getString(R.string.romatsa_filter_restricted)} ($restrCount)"
+            chipGroupRomatsaFilter.findViewById<TextView>(R.id.chip_romatsa_mapn)?.text =
+                "${getString(R.string.romatsa_filter_mapn)} ($mapnCount)"
+        }
+
+        val filtered = when (currentRomatsaFilter) {
+            R.id.chip_romatsa_uas -> allNotices.filter { it.category == RomatsaNoticeCategory.UAS_DRONE }
+            R.id.chip_romatsa_restricted -> allNotices.filter { it.category == RomatsaNoticeCategory.RESTRICTED_UAS }
+            R.id.chip_romatsa_mapn -> allNotices.filter {
+                it.category == RomatsaNoticeCategory.DANGER_AREA || it.category == RomatsaNoticeCategory.MAPN_MILITARY
+            }
+            else -> allNotices
+        }
+
+        romatsaNoticesContainer.removeAllViews()
+        if (filtered.isEmpty()) {
+            tvRomatsaEmpty.text = if (!snap.ok && snap.updatedAtMs != null) {
+                "Nu s-au putut prelua live autorizațiile ROMATSA. Verifică conexiunea la internet și apasă „Actualizează”."
+            } else {
+                getString(R.string.romatsa_empty)
+            }
+            tvRomatsaEmpty.visibility = View.VISIBLE
+            return
+        }
+
+        tvRomatsaEmpty.visibility = View.GONE
+        val inflater = LayoutInflater.from(this)
+        val visible = filtered.take(25)
+        for (notice in visible) {
+            val card = inflater.inflate(R.layout.item_romatsa_notice, romatsaNoticesContainer, false)
+            val tvBadge = card.findViewById<TextView>(R.id.tv_rn_badge)
+            val tvId = card.findViewById<TextView>(R.id.tv_rn_id)
+            val tvState = card.findViewById<TextView>(R.id.tv_rn_state)
+            val tvTitle = card.findViewById<TextView>(R.id.tv_rn_title)
+            val tvMeta = card.findViewById<TextView>(R.id.tv_rn_meta)
+            val tvSummary = card.findViewById<TextView>(R.id.tv_rn_summary)
+
+            val (badgeLabel, badgeColorHex) = when (notice.category) {
+                RomatsaNoticeCategory.UAS_DRONE -> "DRONĂ / UAS" to "#2563EB"
+                RomatsaNoticeCategory.RESTRICTED_UAS -> "RESTRICȚIE UAS" to "#D97706"
+                RomatsaNoticeCategory.DANGER_AREA -> "POLIGON MApN" to "#DC2626"
+                RomatsaNoticeCategory.MAPN_MILITARY -> "ZBOR MIL MApN" to "#7C3AED"
+            }
+            tvBadge.text = badgeLabel
+            tvBadge.background = roundedBackground(Color.parseColor(badgeColorHex), 999f)
+
+            val qPart = if (notice.qCode.isNotBlank()) " (${notice.qCode})" else ""
+            tvId.text = "${notice.notamId} • ${notice.location}$qPart"
+
+            if (notice.activeNow) {
+                tvState.text = "ACTIV"
+                tvState.background = roundedBackground(Color.parseColor("#DCFCE7"), 999f)
+                tvState.setTextColor(Color.parseColor("#15803D"))
+            } else {
+                tvState.text = "PROGRAMAT"
+                tvState.background = roundedBackground(Color.parseColor("#E0F2FE"), 999f)
+                tvState.setTextColor(Color.parseColor("#0369A1"))
+            }
+
+            tvTitle.text = notice.title
+            tvMeta.text = buildString {
+                append("${notice.authority} • ${notice.validFromUtc} → ${notice.validToUtc}")
+                if (notice.verticalLimits.isNotBlank()) {
+                    append("\nAltitudine: ${notice.verticalLimits}")
+                }
+                if (notice.schedule.isNotBlank()) {
+                    val shortSched = if (notice.schedule.length > 72) {
+                        notice.schedule.take(69) + "…"
+                    } else {
+                        notice.schedule
+                    }
+                    append(if (notice.verticalLimits.isNotBlank()) " • Orar: $shortSched" else "\nOrar: $shortSched")
+                }
+            }
+            tvSummary.text = notice.summaryText
+            card.setOnClickListener { showRomatsaNoticeDetailsDialog(notice) }
+            romatsaNoticesContainer.addView(card)
+        }
+
+        if (filtered.size > visible.size) {
+            val tvMore = TextView(this).apply {
+                text = "+ încă ${filtered.size - visible.size} rezervări/NOTAM-uri active în Dobrogea. Folosește filtrele de mai sus sau harta ROMATSA."
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_secondary))
+                textSize = 11.5f
+                setPadding(4, 10, 4, 2)
+            }
+            romatsaNoticesContainer.addView(tvMore)
+        }
+    }
+
+    private fun showRomatsaNoticeDetailsDialog(notice: RomatsaNotice) {
+        val details = buildString {
+            append("NOTAM: ${notice.notamId} (${notice.location})\n")
+            if (notice.qCode.isNotBlank()) append("Cod Q: ${notice.qCode}\n")
+            append("Autoritate: ${notice.authority}\n")
+            append("Stare: ${if (notice.activeNow) "ACTIV ACUM" else "PROGRAMAT"}\n")
+            if (notice.landmark.isNotBlank()) append("Zonă Dobrogea: ${notice.landmark}\n")
+            append("Valabilitate: ${notice.validFromUtc} → ${notice.validToUtc}\n")
+            if (notice.schedule.isNotBlank()) append("Orar activare (D): ${notice.schedule}\n")
+            if (notice.verticalLimits.isNotBlank()) append("Limite verticale (F/G): ${notice.verticalLimits}\n")
+            if (notice.centerLat != null && notice.centerLon != null) {
+                val radPart = notice.radiusNm?.let { " • rază $it NM" }.orEmpty()
+                append(
+                    String.format(
+                        Locale.US,
+                        "Coordonate reper: %.4f°N, %.4f°E%s\n",
+                        notice.centerLat,
+                        notice.centerLon,
+                        radPart
+                    )
+                )
+            }
+            append("\nText oficial ROMATSA:\n")
+            append(notice.rawNotam)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(notice.title)
+            .setMessage(details)
+            .setPositiveButton("Harta ROMATSA UAS") { _, _ ->
+                currentDimapUrl = RomatsaAirspaceClient.ROMATSA_DRONES_MAP_URL
+                dimapWebLoadedOnce = true
+                webViewDimap.loadUrl(currentDimapUrl)
+                Toast.makeText(
+                    this,
+                    "Harta oficială ROMATSA UAS a fost încărcată în panoul de hartă de mai sus.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNeutralButton("Copiază NOTAM") { _, _ ->
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("NOTAM ${notice.notamId}", notice.rawNotam))
+                Toast.makeText(this, "NOTAM ${notice.notamId} copiat în clipboard.", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Închide", null)
+            .show()
+    }
+
+    private fun showRomatsaContactsDialog() {
+        val msg = buildString {
+            append("Contacte oficiale autorizare zboruri UAS / drone în Dobrogea:\n\n")
+            append("1. ROMATSA Constanța — LRCK (zonele RZ1013 / RZ1014, rază 16 NM):\n")
+            append("   • Tel: +40 241 258 872 / +40 737 552 250\n")
+            append("   • Email: drone.lrck@romatsa.ro\n\n")
+            append("2. ROMATSA Tulcea — LRTC:\n")
+            append("   • Tel: +40 240 511 581 / +40 737 552 253\n")
+            append("   • Email: twr.tulcea@romatsa.ro\n\n")
+            append("3. MApN — Aviz filmare/fotografiere aeriană (Aerofoto):\n")
+            append("   • Portal: aerofoto.mapn.ro\n")
+            append("   • Email: aerofoto@mapn.ro\n")
+            append("   • Tel: +40 21 410 01 43 (L–V, 08:00–15:00)\n")
+            append("   • Acces zone militare (RoAF): fdex@roaf.ro\n\n")
+            append("Notă: NOTAM-urile ROMATSA afișează public toate rezervările de spațiu aerian, zborurile UAS publicate prin NOTAM, zonele restricționate (Delta/frontieră) și poligoanele/coridoarele MApN. Avizele nominale individuale emise în portalul securizat aerofoto.mapn.ro sunt confidențiale și vizibile doar solicitantului și autorităților.")
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Contacte ROMATSA / MApN — Dobrogea")
+            .setMessage(msg)
+            .setPositiveButton("Portal MApN Aerofoto") { _, _ ->
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(RomatsaAirspaceClient.MAPN_AEROFOTO_URL)))
+                }
+            }
+            .setNeutralButton("Harta ROMATSA UAS") { _, _ ->
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(RomatsaAirspaceClient.ROMATSA_DRONES_MAP_URL)))
+                }
+            }
+            .setNegativeButton("Închide", null)
+            .show()
+    }
+
 
     private fun ensureNotificationPermissionAndStart() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

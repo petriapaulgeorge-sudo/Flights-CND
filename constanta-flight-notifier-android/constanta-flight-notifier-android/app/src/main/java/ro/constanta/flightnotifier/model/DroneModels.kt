@@ -52,3 +52,40 @@ data class DroneMonitorSnapshot(
     val activeBorderAlarms: List<BorderRegionAlarm> = emptyList(),
     val totalTargetsParsed: Int = 0
 )
+
+enum class RomatsaNoticeCategory {
+    UAS_DRONE,
+    RESTRICTED_UAS,
+    DANGER_AREA,
+    MAPN_MILITARY
+}
+
+data class RomatsaNotice(
+    val notamId: String,
+    val location: String,
+    val qCode: String,
+    val category: RomatsaNoticeCategory,
+    val authority: String,
+    val title: String,
+    val validFromUtc: String,
+    val validToUtc: String,
+    val validFromMs: Long = 0L,
+    val validToMs: Long = 0L,
+    val schedule: String = "",
+    val verticalLimits: String = "",
+    val landmark: String = "",
+    val centerLat: Double? = null,
+    val centerLon: Double? = null,
+    val radiusNm: Int? = null,
+    val activeNow: Boolean = true,
+    val summaryText: String,
+    val rawNotam: String
+)
+
+data class RomatsaAirspaceSnapshot(
+    val updatedAtMs: Long? = null,
+    val ok: Boolean = false,
+    val statusMessage: String = "Se încarcă autorizațiile și NOTAM-urile ROMATSA / MApN pentru Dobrogea…",
+    val notices: List<RomatsaNotice> = emptyList(),
+    val totalParsedNational: Int = 0
+)

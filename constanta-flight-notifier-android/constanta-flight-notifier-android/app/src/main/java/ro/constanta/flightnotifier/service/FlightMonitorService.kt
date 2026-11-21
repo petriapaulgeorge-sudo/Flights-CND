@@ -156,16 +156,27 @@ class FlightMonitorService : Service() {
         }
         val result = AdsbClient.fetchLiveAircraft(
             radiusNm = effectiveRadiusNm,
-            flyItalyApiKey = settings.flyItalyApiKey
+            flyItalyApiKey = settings.flyItalyApiKey,
+            openSkyClientId = settings.openSkyClientId,
+            openSkyClientSecret = settings.openSkyClientSecret
         )
         val nowMs = System.currentTimeMillis()
         if (result.ok) {
             val prevOnlineMs = FlightRepository.getLastOnlineSyncMs()
             FlightRepository.setLastOnlineSyncMs(nowMs)
 
-            // Dacă telefonul a fost offline >= 10 minute, recuperează automat zborurile ratate din OpenSky
-            if (prevOnlineMs > 0L && nowMs - prevOnlineMs >= 10 * 60_000L && !backfillInProgress) {
-                triggerAutoBackfill(prevOnlineMs, nowMs)
+            // Dacă telefonul a fost offline >= 10 minute și OpenSky OAuth2 e configurat, recuperează zborurile ratate
+            if (prevOnlineMs > 0L &&
+                nowMs - prevOnlineMs >= 10 * 60_000L &&
+                !backfillInProgress &&
+                settings.hasOpenSkyAuth
+            ) {
+                triggerAutoBackfill(
+                    fromMs = prevOnlineMs,
+                    toMs = nowMs,
+                    clientId = settings.openSkyClientId,
+                    clientSecret = settings.openSkyClientSecret
+                )
             }
 
             lastLiveAircraft = result.aircraft
@@ -179,11 +190,20 @@ class FlightMonitorService : Service() {
         processCombinedTraffic(nowMs)
     }
 
-    private fun triggerAutoBackfill(fromMs: Long, toMs: Long) {
+    private fun triggerAutoBackfill(fromMs: Long, toMs: Long, clientId: String, clientSecret: String) {
         backfillInProgress = true
         scope.launch {
             try {
-                val res = AdsbClient.fetchMissedFlightsFromOpenSky(fromMs / 1000L, toMs / 1000L)
+                val beginSec = (fromMs - 3 * 60_000L).coerceAtLeast(0L) / 1000L
+                val endSec = toMs / 1000L
+                val res = AdsbClient.fetchMissedFlightsFromOpenSky(
+                    beginSec = beginSec,
+                    endSec = endSec,
+                    clientId = clientId,
+                    clientSecret = clientSecret,
+                    includeRecentReplay = true,
+                    includeBatchApi = (toMs - fromMs) >= 3600_000L
+                )
                 if (res.ok && res.events.isNotEmpty()) {
                     val added = FlightRepository.mergeRecoveredEvents(res.events)
                     if (added > 0) {

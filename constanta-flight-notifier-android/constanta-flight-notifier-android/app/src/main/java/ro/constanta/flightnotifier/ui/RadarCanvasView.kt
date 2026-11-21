@@ -43,7 +43,7 @@ class RadarCanvasView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
     private var aircraft: List<ActiveAircraft> = emptyList()
-    private var rangeKm: Double = 25.0
+    private var rangeKm: Double = 45.0
     private var selectedHex: String? = null
     private var sweepAngleDeg: Float = 0f
     private var lastFrameMs: Long = 0L
@@ -63,7 +63,8 @@ class RadarCanvasView @JvmOverloads constructor(
         Triple("Năvodari", 44.3210, 28.6120),
         Triple("Mamaia", 44.2440, 28.6220),
         Triple("Medgidia", 44.2500, 28.2617),
-        Triple("Ovidiu", 44.2600, 28.5600)
+        Triple("Ovidiu", 44.2600, 28.5600),
+        Triple("Eforie", 44.0600, 28.6350)
     )
 
     // Pints & shaders
@@ -204,6 +205,39 @@ class RadarCanvasView @JvmOverloads constructor(
         lineTo(-18f, 2f)
         lineTo(-3.5f, -7f)
         close()
+    }
+
+    // Siluetă compactă cu aripi drepte pentru aeronave ușoare / școală / GA
+    private val lightPlanePath = Path().apply {
+        moveTo(0f, -17f)
+        lineTo(2.4f, -6f)
+        lineTo(17f, -4f)
+        lineTo(17f, 0.5f)
+        lineTo(2.4f, 0.5f)
+        lineTo(1.8f, 11f)
+        lineTo(7.5f, 13.5f)
+        lineTo(7.5f, 16f)
+        lineTo(0f, 14.5f)
+        lineTo(-7.5f, 16f)
+        lineTo(-7.5f, 13.5f)
+        lineTo(-1.8f, 11f)
+        lineTo(-2.4f, 0.5f)
+        lineTo(-17f, 0.5f)
+        lineTo(-17f, -4f)
+        lineTo(-2.4f, -6f)
+        close()
+    }
+
+    private val tuzlaMarkerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FDE047")
+        style = Paint.Style.STROKE
+        strokeWidth = 2.6f
+    }
+    private val tuzlaLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FEF08A")
+        textSize = 23f
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        setShadowLayer(4f, 0f, 1f, Color.BLACK)
     }
 
     private val sweepTicker = object : Runnable {
@@ -423,12 +457,21 @@ class RadarCanvasView @JvmOverloads constructor(
         canvas.drawText("36", r36x + 14f, cy + rwyHalfY + 8f, ringLabelPaint)
         ringLabelPaint.textAlign = prevAlign
 
-        // 6. Repere Dobrogea / Constanța
+        // 6. Repere Dobrogea / Constanța + Aerodrom Tuzla (LRTZ)
         for ((name, lat, lon) in landmarks) {
             val (px, py) = project(lat, lon, cx, cy, n, centerWx, centerWy, scaleFactor)
             if (px < 16f || px > w - 110f || py < 28f || py > h - 22f) continue
             canvas.drawCircle(px, py, 3.8f, landmarkPaint)
             canvas.drawText(name, px + 9f, py + 7f, landmarkPaint)
+        }
+        run {
+            val (tx, ty) = project(AirportConfig.TUZLA_LAT, AirportConfig.TUZLA_LON, cx, cy, n, centerWx, centerWy, scaleFactor)
+            if (tx in 18f..(w - 135f) && ty in 28f..(h - 22f)) {
+                canvas.drawCircle(tx, ty, 7.5f, tuzlaMarkerPaint)
+                canvas.drawLine(tx - 10f, ty, tx + 10f, ty, tuzlaMarkerPaint)
+                canvas.drawLine(tx, ty - 10f, tx, ty + 10f, tuzlaMarkerPaint)
+                canvas.drawText("Tuzla (LRTZ)", tx + 13f, ty + 7f, tuzlaLabelPaint)
+            }
         }
 
         // 7. Aeronave live, trasee și etichete tip HUD
@@ -441,6 +484,7 @@ class RadarCanvasView @JvmOverloads constructor(
                 isEmergency -> Color.parseColor("#EF4444")
                 ac.phase == "go_around" -> Color.parseColor("#F43F5E")
                 ac.military -> Color.parseColor("#C084FC")
+                ac.generalAviation -> Color.parseColor("#FDE047")
                 else -> phaseColor(ac.phase)
             }
 
@@ -459,20 +503,34 @@ class RadarCanvasView @JvmOverloads constructor(
 
             // Halo luminos discret (pulsant pentru cod de urgență / PAN / Go-Around!)
             val isHighAlert = isEmergency || ac.phase == "go_around"
-            val haloRadius = if (isHighAlert) 26f + 8f * sin(Math.toRadians((sweepAngleDeg * 4f).toDouble())).toFloat() else if (ac.military) 25f else 22f
-            aircraftHaloPaint.color = Color.argb(if (isHighAlert) 125 else if (ac.military) 96 else 72, Color.red(col), Color.green(col), Color.blue(col))
+            val haloRadius = if (isHighAlert) {
+                26f + 8f * sin(Math.toRadians((sweepAngleDeg * 4f).toDouble())).toFloat()
+            } else if (ac.military) {
+                25f
+            } else if (ac.generalAviation) {
+                23f
+            } else {
+                22f
+            }
+            aircraftHaloPaint.color = Color.argb(
+                if (isHighAlert) 125 else if (ac.military || ac.generalAviation) 92 else 72,
+                Color.red(col),
+                Color.green(col),
+                Color.blue(col)
+            )
             canvas.drawCircle(px, py, haloRadius, aircraftHaloPaint)
 
             if (selectedHex == ac.hex) {
                 canvas.drawCircle(px, py, 27f, selectedRingPaint)
             }
 
+            val silhouette = if (ac.generalAviation && !ac.military) lightPlanePath else planePath
             aircraftPaint.color = col
             canvas.save()
             canvas.translate(px, py)
             canvas.rotate((ac.trackDeg ?: 0).toFloat())
-            canvas.drawPath(planePath, aircraftPaint)
-            canvas.drawPath(planePath, aircraftOutlinePaint)
+            canvas.drawPath(silhouette, aircraftPaint)
+            canvas.drawPath(silhouette, aircraftOutlinePaint)
             canvas.restore()
 
             // Etichetă lizibilă (pill semi-transparent) deasupra imaginii satelit
@@ -480,6 +538,15 @@ class RadarCanvasView @JvmOverloads constructor(
                 emInfo != null -> "${emInfo.shortBadge} ${ac.callsign}"
                 ac.phase == "go_around" -> "GO-AROUND ${ac.callsign}"
                 ac.military -> "MIL ${ac.callsign}"
+                ac.generalAviation -> {
+                    val gaPrefix = when (ac.gaCategory) {
+                        "ELICOPTER" -> "HELI"
+                        "PLANOR" -> "PLANOR"
+                        "ULM" -> "ULM"
+                        else -> "GA"
+                    }
+                    "$gaPrefix ${ac.callsign}"
+                }
                 else -> ac.callsign
             }
             val altStr = if (ac.onGround) "SOL" else "${ac.altAglFt ?: "—"}ft"

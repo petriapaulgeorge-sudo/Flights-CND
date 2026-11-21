@@ -18,6 +18,7 @@ import ro.constanta.flightnotifier.model.FeedSnapshot
 import ro.constanta.flightnotifier.model.FlightEvent
 import ro.constanta.flightnotifier.model.FlightEventType
 import ro.constanta.flightnotifier.model.MonitorSettings
+import ro.constanta.flightnotifier.model.RomatsaAirspaceSnapshot
 import ro.constanta.flightnotifier.model.SavedDailyReport
 import java.io.File
 import java.io.FileOutputStream
@@ -59,6 +60,9 @@ object FlightRepository {
 
     private val _droneSnapshot = MutableStateFlow(DroneMonitorSnapshot())
     val droneSnapshot: StateFlow<DroneMonitorSnapshot> = _droneSnapshot.asStateFlow()
+
+    private val _romatsaSnapshot = MutableStateFlow(RomatsaAirspaceSnapshot())
+    val romatsaSnapshot: StateFlow<RomatsaAirspaceSnapshot> = _romatsaSnapshot.asStateFlow()
 
     private val _droneAlerts = MutableStateFlow<List<DroneAlertRecord>>(emptyList())
     val droneAlerts: StateFlow<List<DroneAlertRecord>> = _droneAlerts.asStateFlow()
@@ -104,6 +108,12 @@ object FlightRepository {
             flyItalyApiKey = appPrefs.getString("flyItalyApiKey", null)
                 ?.takeIf { it.isNotBlank() }
                 ?: MonitorSettings.DEFAULT_FLYITALY_API_KEY,
+            openSkyClientId = appPrefs.getString("openSkyClientId", null)
+                ?.takeIf { it.isNotBlank() }
+                ?: MonitorSettings.DEFAULT_OPENSKY_CLIENT_ID,
+            openSkyClientSecret = appPrefs.getString("openSkyClientSecret", null)
+                ?.takeIf { it.isNotBlank() }
+                ?: MonitorSettings.DEFAULT_OPENSKY_CLIENT_SECRET,
             notifyDroneDobrogea = appPrefs.getBoolean("notifyDroneDobrogea", true),
             droneAlertRadiusKm = appPrefs.getInt("droneAlertRadiusKm", 10).coerceIn(5, 50),
             dimapApiUrl = appPrefs.getString("dimapApiUrl", null)
@@ -126,6 +136,10 @@ object FlightRepository {
         _droneSnapshot.value = next
     }
 
+    fun updateRomatsaSnapshot(next: RomatsaAirspaceSnapshot) {
+        _romatsaSnapshot.value = next
+    }
+
     fun setMonitoring(running: Boolean) {
         _isMonitoring.value = running
     }
@@ -145,6 +159,8 @@ object FlightRepository {
             ?.putBoolean("notifyEmergency7500", next.notifyEmergency7500)
             ?.putBoolean("autoStartOnBoot", next.autoStartOnBoot)
             ?.putString("flyItalyApiKey", next.flyItalyApiKey.trim())
+            ?.putString("openSkyClientId", next.openSkyClientId.trim())
+            ?.putString("openSkyClientSecret", next.openSkyClientSecret.trim())
             ?.putBoolean("notifyDroneDobrogea", next.notifyDroneDobrogea)
             ?.putInt("droneAlertRadiusKm", next.droneAlertRadiusKm.coerceIn(5, 50))
             ?.putString("dimapApiUrl", next.dimapApiUrl.trim())
@@ -186,31 +202,70 @@ object FlightRepository {
     }
 
     /**
-     * Îmbină zborurile recuperate din OpenSky cu istoricul local, evitând dublurile
-     * (același hex și tip în fereastra de ±20 minute). Returnează numărul de zboruri nou adăugate.
+     * Verifică dacă două evenimente reale reprezintă același zbor (fără dubluri):
+     * același tip + fereastră ±30 minute + potrivire pe ID, ICAO24 hex, indicativ
+     * sau înmatriculare normalizată (inclusiv încrucișat ADS-B / OGN / OpenSky).
+     */
+    fun isDuplicateFlightEvent(existing: FlightEvent, candidate: FlightEvent): Boolean {
+        if (existing.simulated || candidate.simulated) return false
+        if (existing.id.isNotBlank() && existing.id == candidate.id) return true
+        if (existing.type != candidate.type) return false
+        if (abs(existing.timestampMs - candidate.timestampMs) > 30 * 60_000L) return false
+
+        val hexA = existing.hex.trim().lowercase(Locale.US)
+        val hexB = candidate.hex.trim().lowercase(Locale.US)
+        if (hexA.isNotEmpty() && hexA == hexB) return true
+
+        val csA = normalizeFlightKey(existing.callsign)
+        val csB = normalizeFlightKey(candidate.callsign)
+        if (csA.length >= 4 && csA == csB) return true
+
+        val regA = normalizeFlightKey(existing.registration.orEmpty())
+        val regB = normalizeFlightKey(candidate.registration.orEmpty())
+        if (regA.length >= 4 && regA == regB) return true
+
+        if (csA.length >= 4 && regB.length >= 4 && csA == regB) return true
+        if (regA.length >= 4 && csB.length >= 4 && regA == csB) return true
+
+        return false
+    }
+
+    fun deduplicateFlightEvents(
+        existing: List<FlightEvent>,
+        candidates: List<FlightEvent>
+    ): List<FlightEvent> {
+        if (candidates.isEmpty()) return emptyList()
+        val seen = existing.toMutableList()
+        val uniqueNew = mutableListOf<FlightEvent>()
+        for (cand in candidates) {
+            if (seen.none { isDuplicateFlightEvent(it, cand) }) {
+                seen.add(cand)
+                uniqueNew.add(cand)
+            }
+        }
+        return uniqueNew
+    }
+
+    private fun normalizeFlightKey(raw: String): String {
+        return raw.trim().uppercase(Locale.US).replace(Regex("[^A-Z0-9]"), "")
+    }
+
+    /**
+     * Îmbină zborurile recuperate din OpenSky cu istoricul local, garantând ZERO dubluri
+     * (verificare pe ID, hex ICAO24, callsign și înmatriculare în fereastra ±30 minute).
+     * Returnează numărul de zboruri nou adăugate.
      */
     @Synchronized
     fun mergeRecoveredEvents(recovered: List<FlightEvent>): Int {
         if (recovered.isEmpty()) return 0
-        val current = _events.value.toMutableList()
-        var added = 0
-        for (cand in recovered) {
-            val isDuplicate = current.any { existing ->
-                existing.type == cand.type &&
-                    existing.hex.equals(cand.hex, ignoreCase = true) &&
-                    abs(existing.timestampMs - cand.timestampMs) <= 20 * 60_000L
-            }
-            if (!isDuplicate) {
-                current.add(cand)
-                added += 1
-            }
-        }
-        if (added > 0) {
-            val sorted = current.sortedByDescending { it.timestampMs }.take(MAX_EVENTS)
+        val current = _events.value
+        val uniqueNew = deduplicateFlightEvents(current, recovered)
+        if (uniqueNew.isNotEmpty()) {
+            val sorted = (current + uniqueNew).sortedByDescending { it.timestampMs }.take(MAX_EVENTS)
             _events.value = sorted
             saveEvents(sorted)
         }
-        return added
+        return uniqueNew.size
     }
 
     /**

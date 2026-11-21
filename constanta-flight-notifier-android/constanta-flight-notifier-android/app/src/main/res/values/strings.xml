@@ -18,7 +18,7 @@
     <string name="zoom_25">25 km</string>
     <string name="zoom_45">45 km</string>
     <string name="zoom_100">100 km</string>
-    <string name="radar_legend">Verde: Ateriz. • Albastru: Decol. • Mov: Militar (MIL) • Portocaliu: PAN • Roșu: Urgență</string>
+    <string name="radar_legend">Verde: Ateriz. • Albastru: Decol. • Galben: GA / Școală • Mov: MIL • Portocaliu: PAN • Roșu: Urgență</string>
 
     <string name="btn_start_monitor">Pornește monitorizarea 24/7</string>
     <string name="btn_stop_monitor">Oprește monitorizarea</string>
@@ -46,14 +46,21 @@
     <string name="opt_emg_7500">Cod 7500 — Intervenție ilegală (HIJACK)</string>
     <string name="desc_emg_7500">Deturnare sau act de intervenție ilicită la bordul aeronavei.</string>
 
-    <string name="section_adsb_sources">Surse ADS-B gratuite &amp; zboruri militare (MLAT)</string>
-    <string name="adsb_sources_desc">Activ automat (0 cost): fuziune simultană adsb.lol + airplanes.live + adsb.fi + adsb.one + flux militar /v2/mil. Opțional, poți adăuga cheia gratuită FlyItalyADSB (flyitalyadsb.com — 300.000 cereri/lună) pentru recepție MLAT europeană suplimentară:</string>
+    <string name="section_adsb_sources">Surse ADS-B, OGN/FLARM (GA/Școală) &amp; MLAT</string>
+    <string name="adsb_sources_desc">Activ automat (0 cost): fuziune simultană adsb.lol + airplanes.live + adsb.fi + adsb.one + flux militar /v2/mil + Open Glider Network (OGN/FLARM pentru aeronave mici/școală/elicoptere) + OpenSky Network în paralel. Opțional, cheie gratuită FlyItalyADSB pentru MLAT european suplimentar:</string>
     <string name="hint_flyitaly_key">Cheie API gratuită FlyItalyADSB (opțional)</string>
     <string name="btn_save_flyitaly_key">Salvează cheia</string>
 
     <string name="section_recent">Ultimele evenimente</string>
     <string name="btn_open_history">Vezi tot istoricul</string>
-    <string name="btn_sync_missed">Sincronizează zboruri ratate (offline)</string>
+    <string name="btn_sync_missed">Sincronizează zboruri ratate (ultimele 12h)</string>
+    <string name="opensky_auth_title">Cont OpenSky (OAuth2 gratuit — sincronizare offline)</string>
+    <string name="opensky_auth_status_missing">Neconfigurat — necesar pt. sincronizare offline (evită HTTP 403)</string>
+    <string name="opensky_auth_desc">OpenSky Network blochează acum accesul anonim la istoricul zborurilor (HTTP 403). Creează gratuit un API Client în contul tău OpenSky (opensky-network.org/my-opensky/account) și lipește Client ID + Client Secret mai jos. Deblochează recuperarea din ultimele 12h (replay radar 60 min + arhivă OpenSky 12h, fără dubluri) și 4.000 credite/zi pe radarul live.</string>
+    <string name="btn_open_opensky_portal">Deschide cont OpenSky (gratuit) ↗</string>
+    <string name="hint_opensky_client_id">OpenSky Client ID</string>
+    <string name="hint_opensky_client_secret">OpenSky Client Secret</string>
+    <string name="btn_save_opensky_auth">Salvează și testează conexiunea OpenSky</string>
     <string name="btn_delete_selected_sim">Șterge simulate selectate</string>
     <string name="btn_delete_all_sim">Șterge toate simulatele</string>
 
@@ -137,7 +144,7 @@
     <string name="btn_report_history_share">Share</string>
     <string name="btn_report_history_delete">Șterge</string>
 
-    <!-- Drone Dobrogea (DIMAP) -->
+    <!-- Drone Dobrogea (DIMAP & ROMATSA / MApN) -->
     <string name="drone_header_title">Alerte drone — Sector Dobrogea</string>
     <string name="drone_perimeter_desc">Perimetru monitorizat: frontiera Dunăre / Brațul Chilia (Isaccea – Plauru/Izmail – Chilia Veche – Periprava – Sulina) + apele teritoriale 12 NM Marea Neagră (până la Vama Veche).</string>
     <string name="drone_disclaimer">Notă informativă: DIMAP este un agregator OSINT neoficial (nu are acces la radare militare). Alertele au rol strict informativ și nu înlocuiesc RO-Alert / MApN.</string>
@@ -149,13 +156,26 @@
     <string name="drone_radius_30">30 km</string>
     <string name="btn_drone_poll_now">Verifică acum</string>
     <string name="btn_drone_simulate">Simulează dronă (&lt; 10 km)</string>
-    <string name="drone_map_title">Hartă live DIMAP.LIVE</string>
-    <string name="btn_dimap_lite">Lite (rapid)</string>
-    <string name="btn_dimap_full">Complet</string>
+    <string name="drone_map_title">Hartă live (DIMAP.LIVE / ROMATSA UAS)</string>
+    <string name="btn_dimap_lite">DIMAP Lite</string>
+    <string name="btn_dimap_full">DIMAP Complet</string>
+    <string name="btn_romatsa_map_embed">ROMATSA UAS</string>
     <string name="btn_dimap_reload">Reîncarcă</string>
-    <string name="btn_dimap_browser">Browser</string>
+    <string name="btn_dimap_browser">Browser ↗</string>
     <string name="drone_targets_title">Ținte monitorizate spre Dobrogea (&lt; 150 km)</string>
     <string name="drone_targets_empty">Nu sunt raportate drone în apropierea Dobrogei. Poți apăsa „Simulează dronă” pentru a testa alerta sau poți verifica configurarea DIMAP-API mai jos.</string>
+    <string name="romatsa_auth_title">Autorizații &amp; Rezervări ROMATSA / MApN (Dobrogea)</string>
+    <string name="romatsa_auth_subtitle">Preluare live oficială (flightplan.romatsa.ro): zboruri autorizate UAS/drone prin NOTAM, zone restricționate temporar (frontiera Dunăre/Delta), poligoane MApN (Cap Midia, Babadag, Mangalia, Tuzla) și coridoare MIL. Apasă pe un card pentru NOTAM-ul complet.</string>
+    <string name="btn_romatsa_refresh">Actualizează</string>
+    <string name="romatsa_loading">Se preiau live autorizațiile și NOTAM-urile ROMATSA / MApN pentru Dobrogea…</string>
+    <string name="romatsa_filter_all">Toate</string>
+    <string name="romatsa_filter_uas">Drone / UAS</string>
+    <string name="romatsa_filter_restricted">Restricții UAS</string>
+    <string name="romatsa_filter_mapn">MApN / Poligoane</string>
+    <string name="romatsa_empty">Nu există autorizații sau rezervări active pentru filtrul selectat în zona Dobrogei.</string>
+    <string name="btn_open_romatsa_map">Hartă ROMATSA ↗</string>
+    <string name="btn_open_mapn_aerofoto">MApN Aerofoto ↗</string>
+    <string name="btn_romatsa_contacts">Contacte LRCK / MApN</string>
     <string name="drone_alerts_history_title">Istoric alerte drone Dobrogea</string>
     <string name="drone_alerts_history_empty">Nu există încă alerte înregistrate pentru sectorul Dobrogea.</string>
     <string name="btn_clear_sim_drone_alerts">Șterge simulate</string>
@@ -170,13 +190,13 @@
     <string name="btn_save_drone_config">Salvează configurarea</string>
 
     <!-- Despre -->
-    <string name="about_app_version">Versiunea 2.1.1 • Android</string>
+    <string name="about_app_version">Versiunea 2.3.0 • Android</string>
     <string name="about_swipe_tip">Navigare rapidă: poți glisa stânga/dreapta pe ecran pentru a trece fluid între Radar, Pistă, Istoric, Raport, Drone și Despre.</string>
     <string name="about_desc_title">Descrierea aplicației</string>
-    <string name="about_desc_body">SAT - Monitorizare trafic CND este o aplicație dedicată monitorizării în timp real a traficului aerian civil și militar (ADS-B / MLAT), condițiilor de pistă ale Aeroportului Internațional „Mihail Kogălniceanu” Constanța (IATA: CND / ICAO: LRCK, Pista 18/36, 44.3622°N, 28.4883°E, elevație 353 ft) și alertelor informative de drone în sectorul Dobrogea.\n\nAplicația fuzionează în paralel 4+ rețele ADS-B gratuite nefiltrate (adsb.lol, airplanes.live, adsb.fi, adsb.one + flux militar /v2/mil + opțional FlyItalyADSB), recuperează automat zborurile din perioadele offline prin OpenSky, trimite notificări pentru aterizări, decolări, ratări de aterizare (Go-Around cu analiză live pistă/meteo), coduri de urgență (7700, PAN-PAN, 7600, 7500 — CND + rază 100 km) și drone apropiate la sub 10 km de Dobrogea (DIMAP.LIVE / DIMAP-API + Raion Izmail), evaluează operabilitatea pistei 1–5 și generează rapoarte zilnice PDF cu arhivare locală.</string>
+    <string name="about_desc_body">SAT - Monitorizare trafic CND este o aplicație dedicată monitorizării în timp real a traficului aerian civil, militar și de aviație generală / școală (ADS-B / MLAT / OGN-FLARM), condițiilor de pistă ale Aeroportului Internațional „Mihail Kogălniceanu” Constanța (IATA: CND / ICAO: LRCK, Pista 18/36, 44.3622°N, 28.4883°E, elevație 353 ft, cu reper Aerodrom Tuzla LRTZ), alertelor informative de drone și autorizațiilor/rezervărilor oficiale ROMATSA / MApN în sectorul Dobrogea.\n\nAplicația fuzionează în paralel 7 surse gratuite nefiltrate (adsb.lol, airplanes.live, adsb.fi, adsb.one, flux militar /v2/mil, Open Glider Network OGN/FLARM și OpenSky Network + FlyItalyADSB), recuperează zborurile din ultimele 12 ore fără dubluri prin OpenSky OAuth2 (replay radar 60 min + arhiva 12h), evidențiază avioanele mici/școală (prag 35 kt, etichetă galbenă GA / Școală), afișează live NOTAM-urile ROMATSA/MApN pentru zboruri UAS, poligoane și coridoare militare în Dobrogea, trimite notificări pentru aterizări, decolări, Go-Around, coduri de urgență (7700, PAN-PAN, 7600, 7500) și drone apropiate de Dobrogea (DIMAP-API), evaluează operabilitatea pistei 1–5 și generează rapoarte zilnice PDF.</string>
     <string name="about_features_title">Funcționalități principale</string>
-    <string name="about_features_body">• Secțiune dedicată Drone Dobrogea: hartă live dimap.live încorporată, geofence exact Dunăre/Chilia + 12 NM Marea Neagră, alertă push &lt; 10 km (cu cheie oficială DIMAP-API + opțional UkraineAlarm Raion Izmail) și simulare test\n• Fuziune multi-rețea gratuită nefiltrată (adsb.lol + airplanes.live + adsb.fi + adsb.one + /v2/mil + opțional FlyItalyADSB) cu suport MLAT și evidențiere MIL pe radar\n• Alerte ratare aterizare (Go-Around) corelate live cu METAR LRCK, starea pistei/RWYCC și trafic, cu sumar al motivului probabil\n• Hartă satelit cu radar tactic live pe Pista 18/36 (zoom 15 / 25 / 45 / 100 km) și afișare în clar companie, origine și destinație la selecție\n• Switch individual cu descriere pentru fiecare tip de urgență: 7700, PAN-PAN, 7600, 7500 (CND + rază 100 km)\n• Recuperare automată a zborurilor ratate la reconectare (OpenSky) + sincronizare manuală\n• Stare pistă: buton operabilitate 1–5 (Verde → Roșu), METAR/TAF live LRCK, pistă recomandată de vânt, risc polei și evaluare RWYCC\n• Istoric (2.000 evenimente), ștergere selectivă a zborurilor simulate, căutare pe zile/ore și export .pdf\n• Raport zilnic (Turkish Airlines &amp; Wizz Air, supervizor, articole interzise, Alte date de interes) cu istoric rapoarte salvate, export .pdf și share WhatsApp / Email</string>
+    <string name="about_features_body">• Autorizații &amp; Rezervări oficiale ROMATSA / MApN pentru Dobrogea (în tab-ul Drone): preluare live NOTAM (zboruri autorizate UAS/drone, restricții temporare Delta/frontieră, poligoane Cap Midia / Babadag / Mangalia / Tuzla, coridoare MIL), hartă oficială ROMATSA UAS încorporată și acces rapid MApN Aerofoto + contacte TWR LRCK/LRTC\n• Monitorizare dedicată aviație generală &amp; școală (Tuzla LRTZ / Constanța): fuziune Open Glider Network (OGN/FLARM + baza DDB) + OpenSky în paralel, detecție la viteză redusă (35 kt), toleranță MLAT 180s, siluetă &amp; marcare galbenă GA / Școală și reper Aerodrom Tuzla (LRTZ)\n• Secțiune dedicată Drone Dobrogea: hartă live dimap.live + ROMATSA UAS încorporată, geofence exact Dunăre/Chilia + 12 NM Marea Neagră, alertă push &lt; 10 km (DIMAP-API + Raion Izmail) și simulare test\n• Fuziune multi-rețea gratuită nefiltrată (adsb.lol + airplanes.live + adsb.fi + adsb.one + /v2/mil + OGN + OpenSky + FlyItalyADSB) cu suport MLAT și evidențiere MIL pe radar\n• Alerte ratare aterizare (Go-Around) corelate live cu METAR LRCK, starea pistei/RWYCC și trafic, cu sumar al motivului probabil\n• Hartă satelit cu radar tactic live pe Pista 18/36 (zoom 15 / 25 / 45 / 100 km) și navigare rapidă prin swipe stânga/dreapta\n• Switch individual cu descriere pentru fiecare tip de urgență: 7700, PAN-PAN, 7600, 7500 (CND + rază 100 km)\n• Recuperare rapidă din ultimele 12 ore fără dubluri prin OpenSky OAuth2 (replay radar 60 min + arhiva 12h, 4.000 credite/zi)\n• Stare pistă: buton operabilitate 1–5 (Verde → Roșu), METAR/TAF live LRCK, pistă recomandată de vânt, risc polei și evaluare RWYCC\n• Istoric (2.000 evenimente), ștergere selectivă a zborurilor simulate, căutare pe zile/ore și export .pdf\n• Raport zilnic (Turkish Airlines &amp; Wizz Air, supervizor, articole interzise, Alte date de interes) cu istoric rapoarte salvate, export .pdf și share WhatsApp / Email</string>
     <string name="about_ip_title">Proprietate intelectuală</string>
     <string name="about_ip_notice">Drept de proprietate intelectuală P. G. Petria.</string>
-    <string name="about_disclaimer">Notă: Aplicația are scop strict informativ și utilizează semnale ADS-B comunitare, date meteo publice METAR/TAF și surse OSINT publice. Nu este destinată navigației aeriene sau utilizării operaționale și nu înlocuiește RO-Alert / MApN.</string>
+    <string name="about_disclaimer">Notă: Aplicația are scop strict informativ și utilizează semnale ADS-B/OGN comunitare, date meteo publice METAR/TAF, NOTAM-uri publice ROMATSA și surse OSINT publice. Nu este destinată navigației aeriene sau utilizării operaționale și nu înlocuiește RO-Alert / MApN / ROMATSA.</string>
 </resources>

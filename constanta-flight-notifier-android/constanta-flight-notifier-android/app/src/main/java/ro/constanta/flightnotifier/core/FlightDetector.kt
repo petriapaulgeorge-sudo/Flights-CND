@@ -43,6 +43,8 @@ class FlightDetector {
         var routeHint: String?,
         var military: Boolean,
         var sourceType: String,
+        var generalAviation: Boolean,
+        var gaCategory: String,
         var lastSeenMs: Long,
         var latest: Sample
     ) {
@@ -104,6 +106,8 @@ class FlightDetector {
                     routeHint = raw.routeHint,
                     military = raw.military,
                     sourceType = raw.sourceType,
+                    generalAviation = !raw.military && raw.generalAviation,
+                    gaCategory = if (raw.military) "" else raw.gaCategory,
                     lastSeenMs = nowMs,
                     latest = sample
                 ).also { tracks[hex] = it }
@@ -116,7 +120,14 @@ class FlightDetector {
                 if (raw.simulated) existing.simulated = true
                 if (raw.airlineHint != null) existing.airlineHint = raw.airlineHint
                 if (raw.routeHint != null) existing.routeHint = raw.routeHint
-                if (raw.military) existing.military = true
+                if (raw.military) {
+                    existing.military = true
+                    existing.generalAviation = false
+                    existing.gaCategory = ""
+                } else {
+                    if (raw.generalAviation) existing.generalAviation = true
+                    if (raw.gaCategory.isNotEmpty()) existing.gaCategory = raw.gaCategory
+                }
                 if (raw.sourceType.isNotEmpty()) existing.sourceType = raw.sourceType
                 existing.lastSeenMs = nowMs
                 existing
@@ -135,9 +146,14 @@ class FlightDetector {
                 track.cndRelated = true
             }
 
+            val minSpeedKt = if (track.generalAviation) {
+                AirportConfig.MIN_AIRBORNE_SPEED_GA_KT
+            } else {
+                AirportConfig.MIN_AIRBORNE_SPEED_KT
+            }
             val airborneEnough = !onGround &&
                 (altAglFt == null || altAglFt >= AirportConfig.TAKEOFF_ALT_AGL_FT) &&
-                (raw.gsKt == null || raw.gsKt >= AirportConfig.MIN_AIRBORNE_SPEED_KT)
+                (raw.gsKt == null || raw.gsKt >= minSpeedKt)
 
             if (airborneEnough && distKm <= AirportConfig.APPROACH_ZONE_KM) {
                 track.everAirborneNearAirport = true
@@ -343,7 +359,15 @@ class FlightDetector {
         cooldowns.entries.removeIf { (_, ts) -> nowMs - ts > AirportConfig.EVENT_COOLDOWN_MS * 2 }
 
         val active = tracks.values
-            .filter { nowMs - it.lastSeenMs < 45_000L }
+            .filter { t ->
+                val maxAgeMs = if (
+                    t.generalAviation ||
+                    t.sourceType.contains("mlat", ignoreCase = true) ||
+                    t.sourceType.contains("ogn", ignoreCase = true) ||
+                    t.sourceType.contains("opensky", ignoreCase = true)
+                ) 75_000L else 45_000L
+                nowMs - t.lastSeenMs < maxAgeMs
+            }
             .map { t ->
                 ActiveAircraft(
                     hex = t.hex,
@@ -368,7 +392,9 @@ class FlightDetector {
                     airlineHint = t.airlineHint,
                     routeHint = t.routeHint,
                     military = t.military,
-                    sourceType = t.sourceType
+                    sourceType = t.sourceType,
+                    generalAviation = t.generalAviation,
+                    gaCategory = t.gaCategory
                 )
             }
             .sortedBy { it.distKm }

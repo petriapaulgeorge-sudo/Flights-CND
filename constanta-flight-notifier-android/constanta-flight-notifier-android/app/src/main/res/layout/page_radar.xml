@@ -144,7 +144,6 @@
                                 style="@style/Widget.MaterialComponents.Chip.Choice"
                                 android:layout_width="wrap_content"
                                 android:layout_height="32dp"
-                                android:checked="true"
                                 android:text="@string/zoom_25"
                                 android:textSize="11sp"
                                 app:chipMinTouchTargetSize="32dp" />
@@ -154,6 +153,7 @@
                                 style="@style/Widget.MaterialComponents.Chip.Choice"
                                 android:layout_width="wrap_content"
                                 android:layout_height="32dp"
+                                android:checked="true"
                                 android:text="@string/zoom_45"
                                 android:textSize="11sp"
                                 app:chipMinTouchTargetSize="32dp" />
@@ -660,7 +660,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
-                            android:text="5 rețele gratuite + FlyItalyADSB activ ✓"
+                            android:text="7 surse gratuite (ADS-B + OGN + OpenSky) + FlyItalyADSB ✓"
                             android:textColor="@color/secondary"
                             android:textSize="12sp" />
                     </LinearLayout>
