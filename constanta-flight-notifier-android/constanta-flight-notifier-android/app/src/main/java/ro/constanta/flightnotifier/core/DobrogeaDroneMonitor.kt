@@ -776,28 +776,29 @@ object DobrogeaDroneMonitor {
     fun normalizeThreatType(rawType: String, rawName: String = "", code: Int = -1): String {
         val t = rawType.lowercase(Locale.ROOT).trim()
         val n = rawName.lowercase(Locale.ROOT).trim()
+        val both = "$t $n"
         return when {
-            t == "reactive_shahed" || code == 13 || n.contains("герань-4") || n.contains("geran-4") ->
+            t == "reactive_shahed" || code == 13 || both.contains("герань-4") || both.contains("geran-4") ->
                 "Dronă reactivă (Geran-4)"
-            t == "geran3" || code == 14 || n.contains("герань-3") || n.contains("geran-3") ->
+            t == "geran3" || code == 14 || both.contains("герань-3") || both.contains("geran-3") ->
                 "Dronă reactivă (Geran-3)"
-            t == "geran5" || n.contains("герань-5") || n.contains("geran-5") ->
+            t == "geran5" || both.contains("герань-5") || both.contains("geran-5") ->
                 "Dronă reactivă (Geran-5)"
-            t == "shahed" || code == 10 || t.contains("shahed") || n.contains("шахед") || t.contains("geran") || n.contains("геран") ->
+            t == "shahed" || code == 10 || both.contains("shahed") || both.contains("шахед") || both.contains("geran") || both.contains("геран") ->
                 "Dronă Shahed"
             t == "fpv" || code == 21 ->
                 "Dronă UAV / FPV"
-            t == "avia" || code == 80 || n.contains("авіац") ->
+            t == "avia" || code == 80 || both.contains("авіац") ->
                 "Aviație (OSINT)"
-            t == "kab" || t.contains("kab") || n.contains("каб") || t.contains("bomb") ->
+            t == "kab" || both.contains("kab") || both.contains("каб") || both.contains("bomb") ->
                 "Bombă ghidată (KAB)"
-            t.contains("ballist") || n.contains("баліст") || t.contains("iskander") || t.contains("kinzhal") || n.contains("кинджал") ->
+            both.contains("ballist") || both.contains("баліст") || both.contains("iskander") || both.contains("kinzhal") || both.contains("кинджал") ->
                 "Amenințare balistică"
-            t.contains("missile") || n.contains("ракет") || t.contains("kalibr") || n.contains("калібр") || t.contains("kh-") || n.contains("х-") ->
+            both.contains("missile") || both.contains("ракет") || both.contains("kalibr") || both.contains("калібр") || both.contains("kh-") || both.contains("х-") ->
                 "Rachetă de croazieră"
-            t == "unknown" && (n.contains("бпла") || n.contains("бпа") || code == 22) ->
+            t == "unknown" && (both.contains("бпла") || both.contains("бпа") || code == 22) ->
                 "Dronă (UAV)"
-            t.contains("uav") || t.contains("drone") || t.contains("бпла") || n.contains("бпла") || t.contains("recon") || n.contains("розвід") ->
+            both.contains("uav") || both.contains("drone") || both.contains("бпла") || both.contains("бпа") || both.contains("recon") || both.contains("розвід") ->
                 "Dronă (UAV)"
             rawName.isNotBlank() && !rawName.equals("unknown", ignoreCase = true) ->
                 rawName

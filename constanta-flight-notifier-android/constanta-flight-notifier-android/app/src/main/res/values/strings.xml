@@ -170,7 +170,7 @@
     <string name="btn_save_drone_config">Salvează configurarea</string>
 
     <!-- Despre -->
-    <string name="about_app_version">Versiunea 2.1.0 • Android</string>
+    <string name="about_app_version">Versiunea 2.1.1 • Android</string>
     <string name="about_swipe_tip">Navigare rapidă: poți glisa stânga/dreapta pe ecran pentru a trece fluid între Radar, Pistă, Istoric, Raport, Drone și Despre.</string>
     <string name="about_desc_title">Descrierea aplicației</string>
     <string name="about_desc_body">SAT - Monitorizare trafic CND este o aplicație dedicată monitorizării în timp real a traficului aerian civil și militar (ADS-B / MLAT), condițiilor de pistă ale Aeroportului Internațional „Mihail Kogălniceanu” Constanța (IATA: CND / ICAO: LRCK, Pista 18/36, 44.3622°N, 28.4883°E, elevație 353 ft) și alertelor informative de drone în sectorul Dobrogea.\n\nAplicația fuzionează în paralel 4+ rețele ADS-B gratuite nefiltrate (adsb.lol, airplanes.live, adsb.fi, adsb.one + flux militar /v2/mil + opțional FlyItalyADSB), recuperează automat zborurile din perioadele offline prin OpenSky, trimite notificări pentru aterizări, decolări, ratări de aterizare (Go-Around cu analiză live pistă/meteo), coduri de urgență (7700, PAN-PAN, 7600, 7500 — CND + rază 100 km) și drone apropiate la sub 10 km de Dobrogea (DIMAP.LIVE / DIMAP-API + Raion Izmail), evaluează operabilitatea pistei 1–5 și generează rapoarte zilnice PDF cu arhivare locală.</string>
