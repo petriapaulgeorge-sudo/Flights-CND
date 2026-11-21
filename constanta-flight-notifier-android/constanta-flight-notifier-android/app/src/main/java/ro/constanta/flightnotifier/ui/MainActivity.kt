@@ -12,6 +12,7 @@ import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -20,6 +21,7 @@ import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -27,6 +29,7 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.TextView
@@ -44,10 +47,12 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.switchmaterial.SwitchMaterial
 import com.google.android.material.tabs.TabLayout
+import com.google.android.material.tabs.TabLayoutMediator
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -88,6 +93,10 @@ import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var tvHeaderLivePill: TextView
+    private lateinit var viewPager: ViewPager2
+    private lateinit var sectionPages: List<View>
+
     private lateinit var radarView: RadarCanvasView
     private lateinit var tvEmergencyBanner: TextView
     private lateinit var tvRadarDroneBanner: TextView
@@ -108,6 +117,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var swEmg7600: SwitchMaterial
     private lateinit var swEmg7500: SwitchMaterial
     private lateinit var etFlyItalyKey: TextInputEditText
+    private lateinit var tvRadarAlertsSummary: TextView
+    private lateinit var tvRadarSourcesSummary: TextView
     private lateinit var btnDeleteRecentSim: Button
     private lateinit var tabLayout: TabLayout
     private lateinit var paneRadar: View
@@ -168,6 +179,8 @@ class MainActivity : AppCompatActivity() {
 
     // Drone Dobrogea (DIMAP.LIVE)
     private lateinit var tvDroneAlertBanner: TextView
+    private lateinit var tvDroneSectorPill: TextView
+    private lateinit var tvDroneApiSummary: TextView
     private lateinit var swDroneDobrogea: SwitchMaterial
     private lateinit var chipGroupDroneRadius: ChipGroup
     private lateinit var tvDroneStatus: TextView
@@ -244,8 +257,10 @@ class MainActivity : AppCompatActivity() {
         FlightRepository.init(this)
         NotificationHelper.ensureChannels(this)
 
+        setupSectionPages()
         bindViews()
         setupTabs()
+        setupAccordions()
         setupRadarControls()
         setupRunwayStatusControls()
         setupMonitorControls()
@@ -254,6 +269,41 @@ class MainActivity : AppCompatActivity() {
         setupDroneDobrogeaControls()
         observeState()
         handleOpenTabIntent(intent)
+    }
+
+    private fun <T : View> pageView(id: Int): T {
+        val direct: T? = findViewById(id)
+        if (direct != null) return direct
+        if (::sectionPages.isInitialized) {
+            for (page in sectionPages) {
+                val found: T? = page.findViewById(id)
+                if (found != null) return found
+            }
+        }
+        throw IllegalStateException("View not found in MainActivity pages for id=$id")
+    }
+
+    private fun <T : View> pageViewOrNull(id: Int): T? {
+        val direct: T? = findViewById(id)
+        if (direct != null) return direct
+        if (::sectionPages.isInitialized) {
+            for (page in sectionPages) {
+                val found: T? = page.findViewById(id)
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
+    private fun setupSectionPages() {
+        val inflater = LayoutInflater.from(this)
+        paneRadar = inflater.inflate(R.layout.page_radar, null)
+        paneRunway = inflater.inflate(R.layout.page_runway, null)
+        paneHistory = inflater.inflate(R.layout.page_history, null)
+        paneReport = inflater.inflate(R.layout.page_report, null)
+        paneDrone = inflater.inflate(R.layout.page_drone, null)
+        paneAbout = inflater.inflate(R.layout.page_about, null)
+        sectionPages = listOf(paneRadar, paneRunway, paneHistory, paneReport, paneDrone, paneAbout)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -271,8 +321,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleOpenTabIntent(intent: Intent?) {
         val targetTab = intent?.getIntExtra(EXTRA_OPEN_TAB, -1) ?: -1
-        if (targetTab in 0 until tabLayout.tabCount) {
-            tabLayout.getTabAt(targetTab)?.select()
+        if (targetTab in sectionPages.indices) {
+            viewPager.setCurrentItem(targetTab, false)
         }
     }
 
@@ -288,8 +338,8 @@ class MainActivity : AppCompatActivity() {
             isAppearanceLightNavigationBars = !isNight
         }
 
-        val root = findViewById<View>(R.id.root_container)
-        val extraTopPx = (8 * resources.displayMetrics.density).toInt()
+        val root = pageView<View>(R.id.root_container)
+        val extraTopPx = (6 * resources.displayMetrics.density).toInt()
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, windowInsets ->
             val insets = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
@@ -306,100 +356,101 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun bindViews() {
-        radarView = findViewById(R.id.radar_view)
-        tvEmergencyBanner = findViewById(R.id.tv_emergency_banner)
-        tvRadarDroneBanner = findViewById(R.id.tv_radar_drone_banner)
-        tvSelectedAircraft = findViewById(R.id.tv_selected_aircraft)
-        chipGroupZoom = findViewById(R.id.chip_group_zoom)
-        tvStatus = findViewById(R.id.tv_status)
-        tvStats = findViewById(R.id.tv_stats)
-        tvEmptyRecent = findViewById(R.id.tv_empty_recent)
-        tvHistorySummary = findViewById(R.id.tv_history_summary)
-        tvEmptyHistory = findViewById(R.id.tv_empty_history)
-        btnToggleMonitor = findViewById(R.id.btn_toggle_monitor)
-        swLanding = findViewById(R.id.switch_landing)
-        swTakeoff = findViewById(R.id.switch_takeoff)
-        swApproach = findViewById(R.id.switch_approach)
-        swGoAround = findViewById(R.id.switch_go_around)
-        swEmg7700 = findViewById(R.id.switch_emg_7700)
-        swEmgPan = findViewById(R.id.switch_emg_pan)
-        swEmg7600 = findViewById(R.id.switch_emg_7600)
-        swEmg7500 = findViewById(R.id.switch_emg_7500)
-        etFlyItalyKey = findViewById(R.id.et_flyitaly_key)
-        btnDeleteRecentSim = findViewById(R.id.btn_delete_recent_sim)
-        tabLayout = findViewById(R.id.tab_layout)
-        paneRadar = findViewById(R.id.pane_radar)
-        paneRunway = findViewById(R.id.pane_runway)
-        paneHistory = findViewById(R.id.pane_history)
-        paneReport = findViewById(R.id.pane_report)
-        paneDrone = findViewById(R.id.pane_drone)
-        paneAbout = findViewById(R.id.pane_about)
+        tvHeaderLivePill = pageView(R.id.tv_header_live_pill)
+        tabLayout = pageView(R.id.tab_layout)
+        viewPager = pageView(R.id.view_pager)
 
-        btnRwyOperability = findViewById(R.id.btn_rwy_operability)
-        tvRwyOperabilityDesc = findViewById(R.id.tv_rwy_operability_desc)
+        radarView = pageView(R.id.radar_view)
+        tvEmergencyBanner = pageView(R.id.tv_emergency_banner)
+        tvRadarDroneBanner = pageView(R.id.tv_radar_drone_banner)
+        tvSelectedAircraft = pageView(R.id.tv_selected_aircraft)
+        chipGroupZoom = pageView(R.id.chip_group_zoom)
+        tvStatus = pageView(R.id.tv_status)
+        tvStats = pageView(R.id.tv_stats)
+        tvEmptyRecent = pageView(R.id.tv_empty_recent)
+        tvHistorySummary = pageView(R.id.tv_history_summary)
+        tvEmptyHistory = pageView(R.id.tv_empty_history)
+        btnToggleMonitor = pageView(R.id.btn_toggle_monitor)
+        swLanding = pageView(R.id.switch_landing)
+        swTakeoff = pageView(R.id.switch_takeoff)
+        swApproach = pageView(R.id.switch_approach)
+        swGoAround = pageView(R.id.switch_go_around)
+        swEmg7700 = pageView(R.id.switch_emg_7700)
+        swEmgPan = pageView(R.id.switch_emg_pan)
+        swEmg7600 = pageView(R.id.switch_emg_7600)
+        swEmg7500 = pageView(R.id.switch_emg_7500)
+        etFlyItalyKey = pageView(R.id.et_flyitaly_key)
+        tvRadarAlertsSummary = pageView(R.id.tv_radar_alerts_summary)
+        tvRadarSourcesSummary = pageView(R.id.tv_radar_sources_summary)
+        btnDeleteRecentSim = pageView(R.id.btn_delete_recent_sim)
+
+        btnRwyOperability = pageView(R.id.btn_rwy_operability)
+        tvRwyOperabilityDesc = pageView(R.id.tv_rwy_operability_desc)
         rwyLevelViews = listOf(
-            findViewById(R.id.tv_rwy_lvl_1),
-            findViewById(R.id.tv_rwy_lvl_2),
-            findViewById(R.id.tv_rwy_lvl_3),
-            findViewById(R.id.tv_rwy_lvl_4),
-            findViewById(R.id.tv_rwy_lvl_5)
+            pageView(R.id.tv_rwy_lvl_1),
+            pageView(R.id.tv_rwy_lvl_2),
+            pageView(R.id.tv_rwy_lvl_3),
+            pageView(R.id.tv_rwy_lvl_4),
+            pageView(R.id.tv_rwy_lvl_5)
         )
-        tvRwyFlightCat = findViewById(R.id.tv_rwy_flight_cat)
-        tvRwyObsTime = findViewById(R.id.tv_rwy_obs_time)
-        tvRwySurface = findViewById(R.id.tv_rwy_surface)
-        tvRwyRecommended = findViewById(R.id.tv_rwy_recommended)
-        tvRwyDetails = findViewById(R.id.tv_rwy_details)
-        tvRwyRawMetar = findViewById(R.id.tv_rwy_raw_metar)
-        chipGroupRwyState = findViewById(R.id.chip_group_rwy_state)
-        chipGroupRwycc = findViewById(R.id.chip_group_rwycc)
-        etRunwayNote = findViewById(R.id.et_runway_note)
+        tvRwyFlightCat = pageView(R.id.tv_rwy_flight_cat)
+        tvRwyObsTime = pageView(R.id.tv_rwy_obs_time)
+        tvRwySurface = pageView(R.id.tv_rwy_surface)
+        tvRwyRecommended = pageView(R.id.tv_rwy_recommended)
+        tvRwyDetails = pageView(R.id.tv_rwy_details)
+        tvRwyRawMetar = pageView(R.id.tv_rwy_raw_metar)
+        chipGroupRwyState = pageView(R.id.chip_group_rwy_state)
+        chipGroupRwycc = pageView(R.id.chip_group_rwycc)
+        etRunwayNote = pageView(R.id.et_runway_note)
 
-        etSearchQuery = findViewById(R.id.et_search_query)
-        chipGroupType = findViewById(R.id.chip_group_type)
-        btnFromDate = findViewById(R.id.btn_from_date)
-        btnFromTime = findViewById(R.id.btn_from_time)
-        btnToDate = findViewById(R.id.btn_to_date)
-        btnToTime = findViewById(R.id.btn_to_time)
-        btnSyncMissed = findViewById(R.id.btn_sync_missed)
-        btnDeleteHistorySim = findViewById(R.id.btn_delete_history_sim)
-        btnDeleteAllSim = findViewById(R.id.btn_delete_all_sim)
+        etSearchQuery = pageView(R.id.et_search_query)
+        chipGroupType = pageView(R.id.chip_group_type)
+        btnFromDate = pageView(R.id.btn_from_date)
+        btnFromTime = pageView(R.id.btn_from_time)
+        btnToDate = pageView(R.id.btn_to_date)
+        btnToTime = pageView(R.id.btn_to_time)
+        btnSyncMissed = pageView(R.id.btn_sync_missed)
+        btnDeleteHistorySim = pageView(R.id.btn_delete_history_sim)
+        btnDeleteAllSim = pageView(R.id.btn_delete_all_sim)
 
-        tvReportDate = findViewById(R.id.tv_report_date)
-        chipGroupSupervisor = findViewById(R.id.chip_group_supervisor)
-        tilOtherSupervisor = findViewById(R.id.til_other_supervisor)
-        etOtherSupervisor = findViewById(R.id.et_other_supervisor)
-        tvReportEmptyFlights = findViewById(R.id.tv_report_empty_flights)
-        reportFlightsContainer = findViewById(R.id.report_flights_container)
-        chkShooting = findViewById(R.id.chk_shooting)
-        chkSecurityCommittee = findViewById(R.id.chk_security_committee)
-        chkPnsaExemptions = findViewById(R.id.chk_pnsa_exemptions)
-        etProhProjectiles = findViewById(R.id.et_proh_projectiles)
-        etProhStunning = findViewById(R.id.et_proh_stunning)
-        etProhSharp = findViewById(R.id.et_proh_sharp)
-        etProhTools = findViewById(R.id.et_proh_tools)
-        etProhBlunt = findViewById(R.id.et_proh_blunt)
-        etProhExplosives = findViewById(R.id.et_proh_explosives)
-        tvProhTotal = findViewById(R.id.tv_proh_total)
-        etReportOtherNotes = findViewById(R.id.et_report_other_notes)
-        tvReportHistoryEmpty = findViewById(R.id.tv_report_history_empty)
-        savedReportsContainer = findViewById(R.id.saved_reports_container)
+        tvReportDate = pageView(R.id.tv_report_date)
+        chipGroupSupervisor = pageView(R.id.chip_group_supervisor)
+        tilOtherSupervisor = pageView(R.id.til_other_supervisor)
+        etOtherSupervisor = pageView(R.id.et_other_supervisor)
+        tvReportEmptyFlights = pageView(R.id.tv_report_empty_flights)
+        reportFlightsContainer = pageView(R.id.report_flights_container)
+        chkShooting = pageView(R.id.chk_shooting)
+        chkSecurityCommittee = pageView(R.id.chk_security_committee)
+        chkPnsaExemptions = pageView(R.id.chk_pnsa_exemptions)
+        etProhProjectiles = pageView(R.id.et_proh_projectiles)
+        etProhStunning = pageView(R.id.et_proh_stunning)
+        etProhSharp = pageView(R.id.et_proh_sharp)
+        etProhTools = pageView(R.id.et_proh_tools)
+        etProhBlunt = pageView(R.id.et_proh_blunt)
+        etProhExplosives = pageView(R.id.et_proh_explosives)
+        tvProhTotal = pageView(R.id.tv_proh_total)
+        etReportOtherNotes = pageView(R.id.et_report_other_notes)
+        tvReportHistoryEmpty = pageView(R.id.tv_report_history_empty)
+        savedReportsContainer = pageView(R.id.saved_reports_container)
 
-        tvDroneAlertBanner = findViewById(R.id.tv_drone_alert_banner)
-        swDroneDobrogea = findViewById(R.id.switch_drone_dobrogea)
-        chipGroupDroneRadius = findViewById(R.id.chip_group_drone_radius)
-        tvDroneStatus = findViewById(R.id.tv_drone_status)
-        webViewDimap = findViewById(R.id.webview_dimap)
-        tvDroneTargetsList = findViewById(R.id.tv_drone_targets_list)
-        tvDroneAlertsHistory = findViewById(R.id.tv_drone_alerts_history)
-        etDimapApiUrl = findViewById(R.id.et_dimap_api_url)
-        etDimapApiKey = findViewById(R.id.et_dimap_api_key)
-        etUaApiKey = findViewById(R.id.et_ua_api_key)
+        tvDroneAlertBanner = pageView(R.id.tv_drone_alert_banner)
+        tvDroneSectorPill = pageView(R.id.tv_drone_sector_pill)
+        tvDroneApiSummary = pageView(R.id.tv_drone_api_summary)
+        swDroneDobrogea = pageView(R.id.switch_drone_dobrogea)
+        chipGroupDroneRadius = pageView(R.id.chip_group_drone_radius)
+        tvDroneStatus = pageView(R.id.tv_drone_status)
+        webViewDimap = pageView(R.id.webview_dimap)
+        tvDroneTargetsList = pageView(R.id.tv_drone_targets_list)
+        tvDroneAlertsHistory = pageView(R.id.tv_drone_alerts_history)
+        etDimapApiUrl = pageView(R.id.et_dimap_api_url)
+        etDimapApiKey = pageView(R.id.et_dimap_api_key)
+        etUaApiKey = pageView(R.id.et_ua_api_key)
 
         val openFlight: (FlightEvent) -> Unit = { evt ->
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(evt.adsbExchangeUrl)))
         }
 
-        val rvRecent: RecyclerView = findViewById(R.id.rv_recent_events)
+        val rvRecent: RecyclerView = pageView(R.id.rv_recent_events)
         recentAdapter = EventsAdapter(openFlight) { selectedCount ->
             btnDeleteRecentSim.visibility = if (selectedCount > 0) View.VISIBLE else View.GONE
             if (selectedCount > 0) {
@@ -409,7 +460,7 @@ class MainActivity : AppCompatActivity() {
         rvRecent.layoutManager = LinearLayoutManager(this)
         rvRecent.adapter = recentAdapter
 
-        val rvHistory: RecyclerView = findViewById(R.id.rv_history_events)
+        val rvHistory: RecyclerView = pageView(R.id.rv_history_events)
         historyAdapter = EventsAdapter(openFlight) { selectedCount ->
             btnDeleteHistorySim.visibility = if (selectedCount > 0) View.VISIBLE else View.GONE
             if (selectedCount > 0) {
@@ -421,42 +472,150 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupTabs() {
-        tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: TabLayout.Tab) {
-                paneRadar.visibility = if (tab.position == 0) View.VISIBLE else View.GONE
-                paneRunway.visibility = if (tab.position == 1) View.VISIBLE else View.GONE
-                paneHistory.visibility = if (tab.position == 2) View.VISIBLE else View.GONE
-                paneReport.visibility = if (tab.position == 3) View.VISIBLE else View.GONE
-                paneDrone.visibility = if (tab.position == TAB_DRONE) View.VISIBLE else View.GONE
-                paneAbout.visibility = if (tab.position == 5) View.VISIBLE else View.GONE
-                if (tab.position == 1 && !runwayLoadedOnce) {
-                    refreshRunwayConditions()
-                }
-                if (tab.position == 3) {
-                    refreshDailyReportFlights(forceRender = false)
-                }
-                if (tab.position == TAB_DRONE && !dimapWebLoadedOnce) {
-                    dimapWebLoadedOnce = true
-                    webViewDimap.loadUrl(currentDimapUrl)
-                    if (FlightRepository.settings.value.hasAnyDroneSourceConfigured) {
-                        lifecycleScope.launch(Dispatchers.IO) {
-                            FlightMonitorService.pollDronesAndNotify(this@MainActivity)
-                        }
-                    }
-                }
-            }
+        viewPager.adapter = SectionPagerAdapter(sectionPages)
+        viewPager.offscreenPageLimit = sectionPages.size - 1
+        viewPager.isUserInputEnabled = true
 
-            override fun onTabUnselected(tab: TabLayout.Tab) = Unit
-            override fun onTabReselected(tab: TabLayout.Tab) = Unit
+        val tabSpecs = listOf(
+            R.string.tab_radar to R.drawable.ic_tab_radar,
+            R.string.tab_runway to R.drawable.ic_tab_runway,
+            R.string.tab_history to R.drawable.ic_tab_history,
+            R.string.tab_report to R.drawable.ic_tab_report,
+            R.string.tab_drone to R.drawable.ic_tab_drone,
+            R.string.tab_about to R.drawable.ic_tab_about
+        )
+
+        TabLayoutMediator(tabLayout, viewPager) { tab, position ->
+            val (titleRes, iconRes) = tabSpecs[position]
+            tab.setText(titleRes)
+            tab.setIcon(iconRes)
+        }.attach()
+
+        viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                onSectionEntered(position)
+            }
         })
 
-        findViewById<Button>(R.id.btn_open_history).setOnClickListener {
-            tabLayout.getTabAt(2)?.select()
+        tvHeaderLivePill.setOnClickListener {
+            if (FlightRepository.isMonitoring.value) {
+                stopMonitorService()
+            } else {
+                ensureNotificationPermissionAndStart()
+            }
+        }
+
+        pageView<Button>(R.id.btn_open_history).setOnClickListener {
+            viewPager.setCurrentItem(2, true)
         }
 
         tvRadarDroneBanner.setOnClickListener {
-            tabLayout.getTabAt(TAB_DRONE)?.select()
+            viewPager.setCurrentItem(TAB_DRONE, true)
         }
+    }
+
+    private fun onSectionEntered(position: Int) {
+        if (position == 1 && !runwayLoadedOnce) {
+            refreshRunwayConditions()
+        }
+        if (position == 3) {
+            refreshDailyReportFlights(forceRender = false)
+        }
+        if (position == TAB_DRONE && !dimapWebLoadedOnce) {
+            dimapWebLoadedOnce = true
+            webViewDimap.loadUrl(currentDimapUrl)
+            if (FlightRepository.settings.value.hasAnyDroneSourceConfigured) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    FlightMonitorService.pollDronesAndNotify(this@MainActivity)
+                }
+            }
+        }
+    }
+
+    private fun setupAccordions() {
+        bindAccordion(
+            R.id.header_radar_alerts_accordion,
+            R.id.body_radar_alerts_accordion,
+            R.id.tv_radar_alerts_chevron
+        )
+        bindAccordion(
+            R.id.header_radar_sim_accordion,
+            R.id.body_radar_sim_accordion,
+            R.id.tv_radar_sim_chevron
+        )
+        bindAccordion(
+            R.id.header_radar_sources_accordion,
+            R.id.body_radar_sources_accordion,
+            R.id.tv_radar_sources_chevron
+        )
+        bindAccordion(
+            R.id.header_rwy_specs_accordion,
+            R.id.body_rwy_specs_accordion,
+            R.id.tv_rwy_specs_chevron
+        )
+        bindAccordion(
+            R.id.header_history_range_accordion,
+            R.id.body_history_range_accordion,
+            R.id.tv_history_range_chevron
+        )
+        bindAccordion(
+            R.id.header_drone_api_accordion,
+            R.id.body_drone_api_accordion,
+            R.id.tv_drone_api_chevron
+        )
+    }
+
+    private fun bindAccordion(headerId: Int, bodyId: Int, chevronId: Int) {
+        val header = pageViewOrNull<View>(headerId) ?: return
+        val body = pageViewOrNull<View>(bodyId) ?: return
+        val chevron = pageViewOrNull<TextView>(chevronId)
+        header.setOnClickListener {
+            val opening = body.visibility != View.VISIBLE
+            body.visibility = if (opening) View.VISIBLE else View.GONE
+            chevron?.text = if (opening) "▴" else "▾"
+        }
+    }
+
+    private fun roundedBackground(colorInt: Int, radiusDp: Float): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = radiusDp * resources.displayMetrics.density
+            setColor(colorInt)
+        }
+    }
+
+    private class SectionPagerAdapter(
+        private val pages: List<View>
+    ) : RecyclerView.Adapter<SectionPagerAdapter.PageVH>() {
+
+        class PageVH(val container: FrameLayout) : RecyclerView.ViewHolder(container)
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PageVH {
+            val frame = FrameLayout(parent.context).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            }
+            return PageVH(frame)
+        }
+
+        override fun onBindViewHolder(holder: PageVH, position: Int) {
+            val page = pages[position]
+            (page.parent as? ViewGroup)?.removeView(page)
+            holder.container.removeAllViews()
+            holder.container.addView(
+                page,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+
+        override fun getItemCount(): Int = pages.size
+
+        override fun getItemViewType(position: Int): Int = position
     }
 
     private fun setupRadarControls() {
@@ -585,11 +744,11 @@ class MainActivity : AppCompatActivity() {
             showOperabilityDetailsDialog()
         }
 
-        findViewById<Button>(R.id.btn_refresh_runway).setOnClickListener {
+        pageView<Button>(R.id.btn_refresh_runway).setOnClickListener {
             refreshRunwayConditions()
         }
 
-        findViewById<Button>(R.id.btn_save_runway_note).setOnClickListener {
+        pageView<Button>(R.id.btn_save_runway_note).setOnClickListener {
             val opState = currentLocalOperationalState()
             val rwycc = currentLocalRwyccCode()
             val noteText = etRunwayNote.text?.toString()?.trim().orEmpty()
@@ -686,7 +845,7 @@ class MainActivity : AppCompatActivity() {
 
         if (!c.ok) {
             tvRwyFlightCat.text = "N/A"
-            tvRwyFlightCat.setBackgroundColor(Color.parseColor("#64748B"))
+            tvRwyFlightCat.background = roundedBackground(Color.parseColor("#64748B"), 999f)
             tvRwyObsTime.text = "Nu s-a putut contacta serverul METAR"
             tvRwySurface.text = "Datele meteo live LRCK sunt indisponibile temporar."
             tvRwyRecommended.text = "Pistă recomandată: —"
@@ -702,7 +861,7 @@ class MainActivity : AppCompatActivity() {
             else -> Color.parseColor("#0F766E")
         }
         tvRwyFlightCat.text = c.flightCategory
-        tvRwyFlightCat.setBackgroundColor(catColor)
+        tvRwyFlightCat.background = roundedBackground(catColor, 999f)
         tvRwyObsTime.text = "${c.observationTime} (${c.source})"
 
         tvRwySurface.text = "Stare suprafață estimată: ${c.surfaceEstimate}"
@@ -760,6 +919,7 @@ class MainActivity : AppCompatActivity() {
         swEmg7600.isChecked = s.notifyEmergency7600
         swEmg7500.isChecked = s.notifyEmergency7500
         etFlyItalyKey.setText(s.flyItalyApiKey)
+        updateRadarSummaries()
 
         val saveToggle = {
             FlightRepository.updateSettings(
@@ -774,6 +934,7 @@ class MainActivity : AppCompatActivity() {
                     notifyEmergency7500 = swEmg7500.isChecked
                 )
             )
+            updateRadarSummaries()
         }
         swLanding.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swTakeoff.setOnCheckedChangeListener { _, _ -> saveToggle() }
@@ -784,15 +945,16 @@ class MainActivity : AppCompatActivity() {
         swEmg7600.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swEmg7500.setOnCheckedChangeListener { _, _ -> saveToggle() }
 
-        findViewById<Button>(R.id.btn_save_flyitaly_key).setOnClickListener {
+        pageView<Button>(R.id.btn_save_flyitaly_key).setOnClickListener {
             val key = etFlyItalyKey.text?.toString()?.trim().orEmpty()
             FlightRepository.updateSettings(
                 FlightRepository.settings.value.copy(flyItalyApiKey = key)
             )
+            updateRadarSummaries()
             val msg = if (key.isNotEmpty()) {
                 "Cheia FlyItalyADSB a fost salvată și va fi inclusă automat în fuziunea radar."
             } else {
-                "Cheia FlyItalyADSB a fost ștearsă (rămân active cele 4 rețele gratuite)."
+                "Cheia FlyItalyADSB a fost ștearsă (rămân active cele 5 rețele gratuite)."
             }
             Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
             if (FlightRepository.isMonitoring.value) {
@@ -812,7 +974,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.btn_sim_landing).setOnClickListener {
+        pageView<Button>(R.id.btn_sim_landing).setOnClickListener {
             ensureNotificationPermissionAndAction(
                 Intent(this, FlightMonitorService::class.java).apply {
                     action = FlightMonitorService.ACTION_SIMULATE
@@ -822,7 +984,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        findViewById<Button>(R.id.btn_sim_takeoff).setOnClickListener {
+        pageView<Button>(R.id.btn_sim_takeoff).setOnClickListener {
             ensureNotificationPermissionAndAction(
                 Intent(this, FlightMonitorService::class.java).apply {
                     action = FlightMonitorService.ACTION_SIMULATE
@@ -832,7 +994,7 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        findViewById<Button>(R.id.btn_sim_go_around).setOnClickListener {
+        pageView<Button>(R.id.btn_sim_go_around).setOnClickListener {
             chipGroupZoom.check(R.id.chip_zoom_25)
             ensureNotificationPermissionAndAction(
                 Intent(this, FlightMonitorService::class.java).apply {
@@ -848,7 +1010,7 @@ class MainActivity : AppCompatActivity() {
             ).show()
         }
 
-        findViewById<Button>(R.id.btn_sim_emergency).setOnClickListener {
+        pageView<Button>(R.id.btn_sim_emergency).setOnClickListener {
             val labels = arrayOf(
                 "Cod 7700 — MAYDAY (Urgență generală)",
                 "PAN-PAN — Urgență medicală / LIFEGUARD",
@@ -911,7 +1073,7 @@ class MainActivity : AppCompatActivity() {
             applyHistoryFilter()
         }
 
-        findViewById<Button>(R.id.btn_preset_today).setOnClickListener {
+        pageView<Button>(R.id.btn_preset_today).setOnClickListener {
             val start = Calendar.getInstance().apply {
                 set(Calendar.HOUR_OF_DAY, 0)
                 set(Calendar.MINUTE, 0)
@@ -927,19 +1089,19 @@ class MainActivity : AppCompatActivity() {
             setDateRange(start, end)
         }
 
-        findViewById<Button>(R.id.btn_preset_24h).setOnClickListener {
+        pageView<Button>(R.id.btn_preset_24h).setOnClickListener {
             val end = Calendar.getInstance()
             val start = (end.clone() as Calendar).apply { add(Calendar.HOUR_OF_DAY, -24) }
             setDateRange(start, end)
         }
 
-        findViewById<Button>(R.id.btn_preset_7d).setOnClickListener {
+        pageView<Button>(R.id.btn_preset_7d).setOnClickListener {
             val end = Calendar.getInstance()
             val start = (end.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, -7) }
             setDateRange(start, end)
         }
 
-        findViewById<Button>(R.id.btn_preset_all).setOnClickListener {
+        pageView<Button>(R.id.btn_preset_all).setOnClickListener {
             setDateRange(null, null)
         }
 
@@ -948,7 +1110,7 @@ class MainActivity : AppCompatActivity() {
         btnToDate.setOnClickListener { pickDate(isFrom = false) }
         btnToTime.setOnClickListener { pickTime(isFrom = false) }
 
-        findViewById<Button>(R.id.btn_reset_filters).setOnClickListener {
+        pageView<Button>(R.id.btn_reset_filters).setOnClickListener {
             etSearchQuery.setText("")
             chipGroupType.check(R.id.chip_type_all)
             fromCal = null
@@ -958,7 +1120,7 @@ class MainActivity : AppCompatActivity() {
             applyHistoryFilter()
         }
 
-        findViewById<Button>(R.id.btn_export_pdf).setOnClickListener {
+        pageView<Button>(R.id.btn_export_pdf).setOnClickListener {
             if (filteredEvents.isEmpty()) {
                 Toast.makeText(
                     this,
@@ -1008,7 +1170,7 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        findViewById<Button>(R.id.btn_clear_events).setOnClickListener {
+        pageView<Button>(R.id.btn_clear_events).setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Golești istoricul?")
                 .setMessage("Toate aterizările, decolările și alertele salvate pe telefon vor fi șterse.")
@@ -1066,7 +1228,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupDailyReportControls() {
         updateReportDateLabel()
 
-        findViewById<Button>(R.id.btn_report_pick_date).setOnClickListener {
+        pageView<Button>(R.id.btn_report_pick_date).setOnClickListener {
             DatePickerDialog(
                 this,
                 { _, year, month, day ->
@@ -1087,7 +1249,7 @@ class MainActivity : AppCompatActivity() {
             tilOtherSupervisor.visibility = if (isOther) View.VISIBLE else View.GONE
         }
 
-        findViewById<Button>(R.id.btn_add_manual_flight).setOnClickListener {
+        pageView<Button>(R.id.btn_add_manual_flight).setOnClickListener {
             showAddManualFlightDialog()
         }
 
@@ -1104,12 +1266,12 @@ class MainActivity : AppCompatActivity() {
             etProhTools, etProhBlunt, etProhExplosives
         ).forEach { it.addTextChangedListener(prohibitedWatcher) }
 
-        findViewById<Button>(R.id.btn_daily_generate_pdf).setOnClickListener {
+        pageView<Button>(R.id.btn_daily_generate_pdf).setOnClickListener {
             val stamp = SimpleDateFormat("yyyyMMdd", Locale.US).format(reportDateCal.time)
             createDailyPdfLauncher.launch("SAT_CND_Raport_Zilnic_$stamp.pdf")
         }
 
-        findViewById<Button>(R.id.btn_daily_share_pdf).setOnClickListener {
+        pageView<Button>(R.id.btn_daily_share_pdf).setOnClickListener {
             shareDailyReportPdf()
         }
 
@@ -1552,6 +1714,25 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             getString(R.string.btn_start_monitor)
                         }
+                        if (running) {
+                            tvHeaderLivePill.text = "● LIVE"
+                            tvHeaderLivePill.background = roundedBackground(
+                                ContextCompat.getColor(this@MainActivity, R.color.status_live_bg),
+                                999f
+                            )
+                            tvHeaderLivePill.setTextColor(
+                                ContextCompat.getColor(this@MainActivity, R.color.status_live_fg)
+                            )
+                        } else {
+                            tvHeaderLivePill.text = "● OPRIT"
+                            tvHeaderLivePill.background = roundedBackground(
+                                ContextCompat.getColor(this@MainActivity, R.color.status_off_bg),
+                                999f
+                            )
+                            tvHeaderLivePill.setTextColor(
+                                ContextCompat.getColor(this@MainActivity, R.color.status_off_fg)
+                            )
+                        }
                     }
                 }
                 launch {
@@ -1591,8 +1772,9 @@ class MainActivity : AppCompatActivity() {
                                 val info = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
                                 info != null && info.code != "PAN"
                             }
-                            tvEmergencyBanner.setBackgroundColor(
-                                Color.parseColor(if (hasCritical) "#DC2626" else "#EA580C")
+                            tvEmergencyBanner.background = roundedBackground(
+                                Color.parseColor(if (hasCritical) "#DC2626" else "#EA580C"),
+                                12f
                             )
                             tvEmergencyBanner.text = activeEmergencies.joinToString("\n") { ac ->
                                 val info = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
@@ -1601,14 +1783,17 @@ class MainActivity : AppCompatActivity() {
                                 "$prefix: ${ac.callsign} • $desc • ${ac.distKm} km de LRCK (${ac.altAglFt ?: "—"} ft)"
                             }
                             tvEmergencyBanner.visibility = View.VISIBLE
+                            updateTabAlertBadge(0, true)
                         } else if (activeGoArounds.isNotEmpty()) {
-                            tvEmergencyBanner.setBackgroundColor(Color.parseColor("#E11D48"))
+                            tvEmergencyBanner.background = roundedBackground(Color.parseColor("#E11D48"), 12f)
                             tvEmergencyBanner.text = activeGoArounds.joinToString("\n") { ac ->
                                 "RATARE ATERIZARE (GO-AROUND): ${ac.callsign} • RWY ${ac.runway} • urcare ${ac.altAglFt ?: "—"} ft (${ac.gsKt ?: "—"} kt)"
                             }
                             tvEmergencyBanner.visibility = View.VISIBLE
+                            updateTabAlertBadge(0, true)
                         } else {
                             tvEmergencyBanner.visibility = View.GONE
+                            updateTabAlertBadge(0, false)
                         }
                     }
                 }
@@ -1718,27 +1903,27 @@ class MainActivity : AppCompatActivity() {
             false
         }
 
-        findViewById<Button>(R.id.btn_dimap_lite).setOnClickListener {
+        pageView<Button>(R.id.btn_dimap_lite).setOnClickListener {
             currentDimapUrl = DobrogeaDroneMonitor.DIMAP_LITE_URL
             dimapWebLoadedOnce = true
             webViewDimap.loadUrl(currentDimapUrl)
         }
-        findViewById<Button>(R.id.btn_dimap_full).setOnClickListener {
+        pageView<Button>(R.id.btn_dimap_full).setOnClickListener {
             currentDimapUrl = DobrogeaDroneMonitor.DIMAP_FULL_URL
             dimapWebLoadedOnce = true
             webViewDimap.loadUrl(currentDimapUrl)
         }
-        findViewById<Button>(R.id.btn_dimap_reload).setOnClickListener {
+        pageView<Button>(R.id.btn_dimap_reload).setOnClickListener {
             dimapWebLoadedOnce = true
             webViewDimap.loadUrl(currentDimapUrl)
         }
-        findViewById<Button>(R.id.btn_dimap_browser).setOnClickListener {
+        pageView<Button>(R.id.btn_dimap_browser).setOnClickListener {
             runCatching {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(currentDimapUrl)))
             }
         }
 
-        findViewById<Button>(R.id.btn_drone_poll_now).setOnClickListener {
+        pageView<Button>(R.id.btn_drone_poll_now).setOnClickListener {
             val s = FlightRepository.settings.value
             if (!s.hasAnyDroneSourceConfigured) {
                 Toast.makeText(
@@ -1754,11 +1939,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.btn_drone_simulate).setOnClickListener {
+        pageView<Button>(R.id.btn_drone_simulate).setOnClickListener {
             showSimulateDobrogeaDroneDialog()
         }
 
-        findViewById<Button>(R.id.btn_clear_sim_drone_alerts).setOnClickListener {
+        pageView<Button>(R.id.btn_clear_sim_drone_alerts).setOnClickListener {
             val removed = FlightRepository.clearSimulatedDroneAlerts()
             val snap = FlightRepository.droneSnapshot.value
             val cleanNearby = snap.nearbyTargets.filterNot { it.simulated }
@@ -1770,22 +1955,22 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<Button>(R.id.btn_clear_all_drone_alerts).setOnClickListener {
+        pageView<Button>(R.id.btn_clear_all_drone_alerts).setOnClickListener {
             FlightRepository.clearAllDroneAlerts()
             Toast.makeText(this, "Istoricul alertelor drone a fost golit.", Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<Button>(R.id.btn_request_dimap_key).setOnClickListener {
+        pageView<Button>(R.id.btn_request_dimap_key).setOnClickListener {
             showRequestDimapKeyDialog()
         }
 
-        findViewById<Button>(R.id.btn_request_ua_key).setOnClickListener {
+        pageView<Button>(R.id.btn_request_ua_key).setOnClickListener {
             runCatching {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DobrogeaDroneMonitor.UKRAINE_ALARM_PORTAL_URL)))
             }
         }
 
-        findViewById<Button>(R.id.btn_save_drone_config).setOnClickListener {
+        pageView<Button>(R.id.btn_save_drone_config).setOnClickListener {
             val urlVal = etDimapApiUrl.text?.toString()?.trim() ?: ""
             val keyVal = etDimapApiKey.text?.toString()?.trim() ?: ""
             val uaVal = etUaApiKey.text?.toString()?.trim() ?: ""
@@ -1807,12 +1992,65 @@ class MainActivity : AppCompatActivity() {
                     ukraineAlarmApiKey = uaVal
                 )
             )
+            updateDroneApiSummary()
             Toast.makeText(this, "Configurare API Dobrogea salvată.", Toast.LENGTH_SHORT).show()
             if (urlVal.isNotBlank() || uaVal.isNotBlank()) {
                 lifecycleScope.launch(Dispatchers.IO) {
                     FlightMonitorService.pollDronesAndNotify(this@MainActivity)
                 }
             }
+        }
+        updateDroneApiSummary()
+    }
+
+    private fun updateRadarSummaries() {
+        val s = FlightRepository.settings.value
+        val activeFlags = listOf(
+            s.notifyLanding,
+            s.notifyTakeoff,
+            s.notifyApproach,
+            s.notifyGoAround,
+            s.notifyEmergency7700,
+            s.notifyEmergencyPan,
+            s.notifyEmergency7600,
+            s.notifyEmergency7500
+        ).count { it }
+        val activeLabels = mutableListOf<String>()
+        if (s.notifyLanding) activeLabels.add("Aterizări")
+        if (s.notifyTakeoff) activeLabels.add("Decolări")
+        if (s.notifyGoAround) activeLabels.add("Go-Around")
+        if (s.anyEmergencyEnabled) activeLabels.add("Urgențe")
+        val tail = if (activeLabels.isEmpty()) "Toate oprite" else activeLabels.joinToString(", ")
+        tvRadarAlertsSummary.text = "$activeFlags/8 active • $tail"
+
+        tvRadarSourcesSummary.text = if (s.flyItalyApiKey.isNotBlank()) {
+            "5 rețele gratuite + FlyItalyADSB activ ✓"
+        } else {
+            "5 rețele gratuite active (fără FlyItalyADSB)"
+        }
+    }
+
+    private fun updateDroneApiSummary() {
+        val s = FlightRepository.settings.value
+        tvDroneApiSummary.text = when {
+            s.dimapApiUrl.isNotBlank() -> {
+                val shortHost = s.dimapApiUrl.removePrefix("https://").removePrefix("http://").take(34)
+                "Preconfigurat: $shortHost ✓"
+            }
+            s.ukraineAlarmApiKey.isNotBlank() -> "Activ: UkraineAlarm API (Izmail/Odesa) ✓"
+            else -> "Neconfigurat — apasă pentru a adăuga URL/cheie"
+        }
+    }
+
+    private fun updateTabAlertBadge(tabIndex: Int, active: Boolean) {
+        val tab = tabLayout.getTabAt(tabIndex) ?: return
+        if (active) {
+            tab.orCreateBadge.apply {
+                backgroundColor = Color.parseColor("#DC2626")
+                isVisible = true
+            }
+        } else {
+            tab.removeBadge()
         }
     }
 
@@ -1902,9 +2140,20 @@ class MainActivity : AppCompatActivity() {
             tvDroneAlertBanner.visibility = View.VISIBLE
             tvRadarDroneBanner.text = "$bannerText\n(Apasă pentru a deschide tab-ul Drone & harta DIMAP)"
             tvRadarDroneBanner.visibility = View.VISIBLE
+            tvDroneSectorPill.text = "● ALERTĂ ACTIVĂ"
+            tvDroneSectorPill.background = roundedBackground(Color.parseColor("#DC2626"), 999f)
+            tvDroneSectorPill.setTextColor(Color.WHITE)
+            updateTabAlertBadge(TAB_DRONE, true)
         } else {
             tvDroneAlertBanner.visibility = View.GONE
             tvRadarDroneBanner.visibility = View.GONE
+            tvDroneSectorPill.text = "● FĂRĂ ALERTE"
+            tvDroneSectorPill.background = roundedBackground(
+                ContextCompat.getColor(this, R.color.status_live_bg),
+                999f
+            )
+            tvDroneSectorPill.setTextColor(ContextCompat.getColor(this, R.color.status_live_fg))
+            updateTabAlertBadge(TAB_DRONE, false)
         }
 
         // Lista țintelor apropiate (< 50 km de Dobrogea)

@@ -267,25 +267,40 @@ class RadarCanvasView @JvmOverloads constructor(
         postOnAnimation(sweepTicker)
     }
 
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.action == MotionEvent.ACTION_UP) {
-            val tx = event.x
-            val ty = event.y
-            var best: ActiveAircraft? = null
-            var bestDist = 64f
-            for (ac in aircraft) {
-                val p = screenPositions[ac.hex] ?: continue
-                val d = hypot(p.first - tx, p.second - ty)
-                if (d < bestDist) {
-                    bestDist = d
-                    best = ac
-                }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchDownX = event.x
+                touchDownY = event.y
+                return true
             }
-            selectedHex = best?.hex
-            onAircraftSelected?.invoke(best)
-            invalidate()
-            performClick()
-            return true
+            MotionEvent.ACTION_UP -> {
+                val moved = hypot(event.x - touchDownX, event.y - touchDownY)
+                if (moved <= touchSlop) {
+                    val tx = event.x
+                    val ty = event.y
+                    var best: ActiveAircraft? = null
+                    var bestDist = 64f
+                    for (ac in aircraft) {
+                        val p = screenPositions[ac.hex] ?: continue
+                        val d = hypot(p.first - tx, p.second - ty)
+                        if (d < bestDist) {
+                            bestDist = d
+                            best = ac
+                        }
+                    }
+                    selectedHex = best?.hex
+                    onAircraftSelected?.invoke(best)
+                    invalidate()
+                    performClick()
+                }
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> return false
         }
         return true
     }

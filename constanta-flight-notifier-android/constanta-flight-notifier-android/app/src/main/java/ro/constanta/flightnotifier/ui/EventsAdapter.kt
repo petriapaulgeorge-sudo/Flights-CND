@@ -1,6 +1,7 @@
 package ro.constanta.flightnotifier.ui
 
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -61,7 +62,12 @@ class EventsAdapter(
         }
 
         holder.tvBadge.text = if (evt.simulated) "$badgeText • TEST" else badgeText
-        holder.tvBadge.setBackgroundColor(badgeColor)
+        val density = holder.itemView.resources.displayMetrics.density
+        holder.tvBadge.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 999f * density
+            setColor(badgeColor)
+        }
         holder.tvCallsign.text = evt.callsign
         holder.tvTime.text = timeFormat.format(Date(evt.timestampMs))
 
