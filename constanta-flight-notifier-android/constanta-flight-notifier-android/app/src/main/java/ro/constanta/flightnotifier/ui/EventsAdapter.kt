@@ -53,6 +53,7 @@ class EventsAdapter(
             FlightEventType.LANDING -> "ATERIZARE" to Color.parseColor("#0F766E")
             FlightEventType.TAKEOFF -> "DECOLARE" to Color.parseColor("#0369A1")
             FlightEventType.APPROACH -> "APROPIERE" to Color.parseColor("#B45309")
+            FlightEventType.GO_AROUND -> "RATARE ATERIZARE" to Color.parseColor("#E11D48")
             FlightEventType.EMERGENCY -> {
                 if (emCode == "PAN") "PAN-PAN" to Color.parseColor("#EA580C")
                 else "URGENȚĂ $emCode".trim() to Color.parseColor("#DC2626")
@@ -64,7 +65,7 @@ class EventsAdapter(
         holder.tvCallsign.text = evt.callsign
         holder.tvTime.text = timeFormat.format(Date(evt.timestampMs))
 
-        val details = listOfNotNull(
+        val baseDetails = listOfNotNull(
             evt.emergencyLabel,
             if (evt.detectionReason == "opensky_backfill") "Recuperat offline (OpenSky)" else null,
             if (evt.type == FlightEventType.EMERGENCY) "${evt.distKm} km de LRCK" else "RWY ${evt.runway}",
@@ -74,7 +75,11 @@ class EventsAdapter(
             evt.route,
             "${evt.altAglFt ?: "—"} ft • ${evt.gsKt ?: "—"} kt"
         ).joinToString("  •  ")
-        holder.tvDetails.text = details
+        holder.tvDetails.text = if (!evt.goAroundSummary.isNullOrBlank()) {
+            "$baseDetails\n${evt.goAroundSummary}"
+        } else {
+            baseDetails
+        }
 
         // Doar zborurile simulate pot fi bifate și șterse selectiv
         holder.cbSelect.setOnCheckedChangeListener(null)

@@ -11,8 +11,15 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 data class AdsbFetchResult(
     val ok: Boolean,
@@ -37,65 +44,174 @@ data class AircraftRouteDetails(
 
 object AdsbClient {
 
-    private const val USER_AGENT = "SAT-Monitorizare-Trafic-CND/1.5 (LRCK-CND)"
-    private const val TIMEOUT_MS = 8000
+    private const val USER_AGENT = "SAT-Monitorizare-Trafic-CND/1.7 (LRCK-CND)"
+    private const val TIMEOUT_MS = 7500
     private val routeDetailsCache = ConcurrentHashMap<String, AircraftRouteDetails>()
+    private val fetchExecutor = Executors.newFixedThreadPool(6)
 
     private data class Provider(
         val name: String,
         val buildUrl: (Int) -> String,
-        val parse: (String) -> List<RawAircraft>
+        val parse: (String) -> List<RawAircraft>,
+        val headers: Map<String, String> = emptyMap(),
+        val filterWithinKm: Double? = null
     )
 
-    private val providers = listOf(
-        Provider(
-            name = "airplanes.live",
-            buildUrl = { r -> "https://api.airplanes.live/v2/point/${AirportConfig.LAT}/${AirportConfig.LON}/$r" },
-            parse = ::parseReadsbV2
-        ),
+    private val freeReadsbProviders = listOf(
         Provider(
             name = "adsb.lol",
             buildUrl = { r -> "https://api.adsb.lol/v2/point/${AirportConfig.LAT}/${AirportConfig.LON}/$r" },
-            parse = ::parseReadsbV2
+            parse = { body -> parseReadsbV2(body, forceMilitary = false) }
+        ),
+        Provider(
+            name = "airplanes.live",
+            buildUrl = { r -> "https://api.airplanes.live/v2/point/${AirportConfig.LAT}/${AirportConfig.LON}/$r" },
+            parse = { body -> parseReadsbV2(body, forceMilitary = false) }
         ),
         Provider(
             name = "adsb.fi",
             buildUrl = { r -> "https://opendata.adsb.fi/api/v2/lat/${AirportConfig.LAT}/lon/${AirportConfig.LON}/dist/$r" },
-            parse = ::parseReadsbV2
+            parse = { body -> parseReadsbV2(body, forceMilitary = false) }
         ),
         Provider(
-            name = "opensky",
-            buildUrl = { r ->
-                val radiusKm = r * 1.852
-                val dLat = radiusKm / 111.1
-                val dLon = radiusKm / (111.32 * kotlin.math.cos(Math.toRadians(AirportConfig.LAT)))
-                val lamin = String.format(java.util.Locale.US, "%.4f", AirportConfig.LAT - dLat)
-                val lamax = String.format(java.util.Locale.US, "%.4f", AirportConfig.LAT + dLat)
-                val lomin = String.format(java.util.Locale.US, "%.4f", AirportConfig.LON - dLon)
-                val lomax = String.format(java.util.Locale.US, "%.4f", AirportConfig.LON + dLon)
-                "https://opensky-network.org/api/states/all?lamin=$lamin&lomin=$lomin&lamax=$lamax&lomax=$lomax"
-            },
-            parse = ::parseOpenSky
+            name = "adsb.one",
+            buildUrl = { r -> "https://api.adsb.one/v2/point/${AirportConfig.LAT}/${AirportConfig.LON}/$r" },
+            parse = { body -> parseReadsbV2(body, forceMilitary = false) }
         )
     )
 
-    fun fetchLiveAircraft(radiusNm: Int = 25): AdsbFetchResult {
+    /**
+     * Interoghează ÎN PARALEL și fuzionează toate rețelele gratuite nefiltrate (adsb.lol,
+     * airplanes.live, adsb.fi, adsb.one + fluxul militar /v2/mil + opțional FlyItalyADSB),
+     * maximizând acoperirea MLAT și a zborurilor militare din zona Constanța / Marea Neagră.
+     */
+    fun fetchLiveAircraft(radiusNm: Int = 55, flyItalyApiKey: String = ""): AdsbFetchResult {
+        val radiusKm = maxOf(radiusNm * 1.852, 110.0)
+        val activeProviders = ArrayList<Provider>(freeReadsbProviders.size + 2)
+        activeProviders.addAll(freeReadsbProviders)
+
+        // Flux dedicat militar (adsb.lol /v2/mil) filtrat în jurul LRCK pentru acoperire militară maximă
+        activeProviders.add(
+            Provider(
+                name = "MIL-feed",
+                buildUrl = { _ -> "https://api.adsb.lol/v2/mil" },
+                parse = { body -> parseReadsbV2(body, forceMilitary = true) },
+                filterWithinKm = maxOf(radiusKm, 140.0)
+            )
+        )
+
+        val trimmedKey = flyItalyApiKey.trim()
+        if (trimmedKey.isNotEmpty()) {
+            val kmInt = radiusKm.roundToInt().coerceIn(50, 480)
+            activeProviders.add(
+                Provider(
+                    name = "FlyItalyADSB",
+                    buildUrl = { _ ->
+                        "https://api.flyitalyadsb.com/v2/lat/${AirportConfig.LAT}/lon/${AirportConfig.LON}/dist/$kmInt"
+                    },
+                    parse = { body -> parseReadsbV2(body, forceMilitary = false) },
+                    headers = mapOf("X-Api-Key" to trimmedKey)
+                )
+            )
+        }
+
+        val futures = activeProviders.map { p ->
+            p.name to fetchExecutor.submit(Callable {
+                val body = httpGet(p.buildUrl(radiusNm), TIMEOUT_MS, p.headers)
+                val parsed = p.parse(body)
+                val maxKm = p.filterWithinKm
+                if (maxKm != null) {
+                    parsed.filter { haversineKm(it.lat, it.lon, AirportConfig.LAT, AirportConfig.LON) <= maxKm }
+                } else {
+                    parsed
+                }
+            })
+        }
+
+        val succeededNames = mutableListOf<String>()
+        val collectedLists = mutableListOf<List<RawAircraft>>()
         val errors = mutableListOf<String>()
-        for (p in providers) {
+
+        for ((name, fut) in futures) {
             try {
-                val body = httpGet(p.buildUrl(radiusNm), TIMEOUT_MS)
-                val list = p.parse(body)
-                return AdsbFetchResult(ok = true, provider = p.name, aircraft = list)
+                val list = fut.get((TIMEOUT_MS + 1500).toLong(), TimeUnit.MILLISECONDS)
+                if (name != "MIL-feed") {
+                    succeededNames.add(name)
+                }
+                collectedLists.add(list)
             } catch (e: Exception) {
-                errors.add("${p.name}: ${e.message ?: "eroare"}")
+                fut.cancel(true)
+                errors.add("$name: ${e.cause?.message ?: e.message ?: "eroare"}")
             }
         }
+
+        if (collectedLists.isNotEmpty() && succeededNames.isNotEmpty()) {
+            val merged = mergeAircraftLists(collectedLists)
+            val label = if (succeededNames.size == 1) {
+                succeededNames.first()
+            } else {
+                "Fuziune ${succeededNames.size} rețele (${succeededNames.joinToString("+")})"
+            }
+            return AdsbFetchResult(ok = true, provider = label, aircraft = merged)
+        }
+
+        // Fallback final: OpenSky Network
+        try {
+            val dLat = radiusKm / 111.1
+            val dLon = radiusKm / (111.32 * cos(Math.toRadians(AirportConfig.LAT)))
+            val lamin = String.format(Locale.US, "%.4f", AirportConfig.LAT - dLat)
+            val lamax = String.format(Locale.US, "%.4f", AirportConfig.LAT + dLat)
+            val lomin = String.format(Locale.US, "%.4f", AirportConfig.LON - dLon)
+            val lomax = String.format(Locale.US, "%.4f", AirportConfig.LON + dLon)
+            val url = "https://opensky-network.org/api/states/all?lamin=$lamin&lomin=$lomin&lamax=$lamax&lomax=$lomax"
+            val body = httpGet(url, TIMEOUT_MS)
+            val list = parseOpenSky(body)
+            return AdsbFetchResult(ok = true, provider = "opensky", aircraft = list)
+        } catch (e: Exception) {
+            errors.add("opensky: ${e.message ?: "eroare"}")
+        }
+
         return AdsbFetchResult(
             ok = false,
             provider = null,
             aircraft = emptyList(),
             error = errors.joinToString(" | ")
         )
+    }
+
+    /**
+     * Combină aeronavele din mai multe rețele ADS-B, deduplicând pe codul ICAO hex și
+     * păstrând cele mai complete date (inclusiv flag-ul military și câmpurile MLAT).
+     */
+    fun mergeAircraftLists(lists: List<List<RawAircraft>>): List<RawAircraft> {
+        val byHex = LinkedHashMap<String, RawAircraft>()
+        for (list in lists) {
+            for (ac in list) {
+                val key = ac.hex.trim().lowercase(Locale.US)
+                if (key.isEmpty()) continue
+                val existing = byHex[key]
+                if (existing == null) {
+                    byHex[key] = ac
+                } else {
+                    byHex[key] = existing.copy(
+                        callsign = existing.callsign.ifBlank { ac.callsign },
+                        registration = existing.registration.ifBlank { ac.registration },
+                        aircraftType = existing.aircraftType.ifBlank { ac.aircraftType },
+                        squawk = existing.squawk.ifBlank { ac.squawk },
+                        emergencyStatus = existing.emergencyStatus.ifBlank { ac.emergencyStatus },
+                        altBaroFt = existing.altBaroFt ?: ac.altBaroFt,
+                        altGeomFt = existing.altGeomFt ?: ac.altGeomFt,
+                        onGround = existing.onGround || ac.onGround,
+                        gsKt = existing.gsKt ?: ac.gsKt,
+                        trackDeg = existing.trackDeg ?: ac.trackDeg,
+                        verticalRateFpm = existing.verticalRateFpm ?: ac.verticalRateFpm,
+                        military = existing.military || ac.military,
+                        sourceType = existing.sourceType.ifBlank { ac.sourceType }
+                    )
+                }
+            }
+        }
+        return byHex.values.toList()
     }
 
     /**
@@ -230,16 +346,29 @@ object AdsbClient {
         )
     }
 
-    private fun parseReadsbV2(body: String): List<RawAircraft> {
+    fun parseReadsbV2(body: String, forceMilitary: Boolean = false): List<RawAircraft> {
         val root = JSONObject(body)
         val arr = root.optJSONArray("ac") ?: root.optJSONArray("aircraft") ?: JSONArray()
         val out = ArrayList<RawAircraft>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val hex = o.optString("hex").trim()
-            if (hex.isEmpty() || !o.has("lat") || !o.has("lon")) continue
-            val lat = o.optDouble("lat", Double.NaN)
-            val lon = o.optDouble("lon", Double.NaN)
+            val hex = o.optString("hex").trim().lowercase(Locale.US)
+            if (hex.isEmpty()) continue
+
+            var lat = if (o.has("lat") && !o.isNull("lat")) o.optDouble("lat", Double.NaN) else Double.NaN
+            var lon = if (o.has("lon") && !o.isNull("lon")) o.optDouble("lon", Double.NaN) else Double.NaN
+
+            // Suport MLAT / zboruri militare cu poziție intermitentă în obiectul lastPosition
+            if (!lat.isFinite() || !lon.isFinite()) {
+                val lp = o.optJSONObject("lastPosition")
+                if (lp != null) {
+                    val seenPos = lp.optDouble("seen_pos", 999.0)
+                    if (seenPos <= 120.0) {
+                        lat = lp.optDouble("lat", Double.NaN)
+                        lon = lp.optDouble("lon", Double.NaN)
+                    }
+                }
+            }
             if (!lat.isFinite() || !lon.isFinite()) continue
 
             val altRaw = o.opt("alt_baro")
@@ -254,11 +383,15 @@ object AdsbClient {
             val baroRate = if (o.has("baro_rate") && !o.isNull("baro_rate")) o.optDouble("baro_rate", Double.NaN).takeIf { it.isFinite() }?.roundToInt() else null
             val geomRate = if (o.has("geom_rate") && !o.isNull("geom_rate")) o.optDouble("geom_rate", Double.NaN).takeIf { it.isFinite() }?.roundToInt() else null
             val emStatus = o.optString("emergency").trim().takeIf { it.isNotEmpty() && !it.equals("none", ignoreCase = true) }.orEmpty()
+            val callsign = o.optString("flight").trim()
+            val dbFlags = o.optInt("dbFlags", 0)
+            val isMil = forceMilitary || ((dbFlags and 1) != 0) || isLikelyMilitary(callsign, hex)
+            val srcType = o.optString("type").trim()
 
             out.add(
                 RawAircraft(
-                    hex = hex.lowercase(),
-                    callsign = o.optString("flight").trim(),
+                    hex = hex,
+                    callsign = callsign,
                     registration = o.optString("r").trim(),
                     aircraftType = o.optString("t").trim(),
                     squawk = o.optString("squawk").trim(),
@@ -270,19 +403,36 @@ object AdsbClient {
                     onGround = onGround,
                     gsKt = gsKt,
                     trackDeg = trackDeg,
-                    verticalRateFpm = baroRate ?: geomRate
+                    verticalRateFpm = baroRate ?: geomRate,
+                    military = isMil,
+                    sourceType = srcType
                 )
             )
         }
         return out
     }
 
+    fun isLikelyMilitary(callsign: String, hex: String): Boolean {
+        val h = hex.trim().lowercase(Locale.US)
+        if (h.startsWith("ae") || h.startsWith("af") || h.startsWith("43c")) return true
+        val cs = callsign.trim().uppercase(Locale.US)
+        if (cs.isEmpty()) return false
+        return militaryPrefixes.any { cs.startsWith(it) }
+    }
+
+    private val militaryPrefixes = listOf(
+        "ROF", "RCH", "NATO", "RRR", "FORTE", "LAGR", "NCHO", "JAKE",
+        "HOMER", "BART", "GAF", "FAF", "IAM", "BAF", "NAF", "HAF",
+        "TUAF", "PLF", "CNV", "CFC", "SHF", "ASY", "SAM", "SPAR",
+        "USAF", "ARMY", "NAVY", "MMF", "MRAF", "DUKE", "KING", "REACH"
+    )
+
     private fun parseOpenSky(body: String): List<RawAircraft> {
         val states = JSONObject(body).optJSONArray("states") ?: return emptyList()
         val out = ArrayList<RawAircraft>(states.length())
         for (i in 0 until states.length()) {
             val s = states.optJSONArray(i) ?: continue
-            val hex = s.optString(0).trim()
+            val hex = s.optString(0).trim().lowercase(Locale.US)
             val lon = s.optDouble(5, Double.NaN)
             val lat = s.optDouble(6, Double.NaN)
             if (hex.isEmpty() || !lat.isFinite() || !lon.isFinite()) continue
@@ -293,11 +443,12 @@ object AdsbClient {
             val velMs = s.optDouble(9, Double.NaN)
             val track = s.optDouble(10, Double.NaN)
             val vrateMs = s.optDouble(11, Double.NaN)
+            val cs = s.optString(1).trim()
 
             out.add(
                 RawAircraft(
-                    hex = hex.lowercase(),
-                    callsign = s.optString(1).trim(),
+                    hex = hex,
+                    callsign = cs,
                     squawk = s.optString(14).trim(),
                     lat = lat,
                     lon = lon,
@@ -306,7 +457,9 @@ object AdsbClient {
                     onGround = onGround,
                     gsKt = if (velMs.isFinite()) (velMs * 1.94384).roundToInt() else null,
                     trackDeg = if (track.isFinite()) track.roundToInt() else null,
-                    verticalRateFpm = if (vrateMs.isFinite()) (vrateMs * 196.8504).roundToInt() else null
+                    verticalRateFpm = if (vrateMs.isFinite()) (vrateMs * 196.8504).roundToInt() else null,
+                    military = isLikelyMilitary(cs, hex),
+                    sourceType = "opensky"
                 )
             )
         }
@@ -573,13 +726,30 @@ object AdsbClient {
         "PRG" to "Praga (PRG / LKPR) — Cehia"
     )
 
-    private fun httpGet(urlStr: String, timeoutMs: Int): String {
+    private fun haversineKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = sin(dLat / 2) * sin(dLat / 2) +
+            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+            sin(dLon / 2) * sin(dLon / 2)
+        return 2 * r * atan2(sqrt(a), sqrt(1 - a))
+    }
+
+    private fun httpGet(
+        urlStr: String,
+        timeoutMs: Int,
+        extraHeaders: Map<String, String> = emptyMap()
+    ): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = timeoutMs
             readTimeout = timeoutMs
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", USER_AGENT)
+            for ((k, v) in extraHeaders) {
+                setRequestProperty(k, v)
+            }
         }
         return try {
             val code = conn.responseCode

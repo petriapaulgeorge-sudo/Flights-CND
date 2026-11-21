@@ -9,6 +9,7 @@
     <string name="tab_runway">Pistă</string>
     <string name="tab_history">Istoric</string>
     <string name="tab_report">Raport</string>
+    <string name="tab_drone">Drone</string>
     <string name="tab_about">Despre</string>
 
     <string name="radar_header">Satelit LRCK</string>
@@ -16,18 +17,21 @@
     <string name="zoom_25">25 km</string>
     <string name="zoom_45">45 km</string>
     <string name="zoom_100">100 km</string>
-    <string name="radar_legend">Verde: Ateriz. • Albastru: Decol. • Portocaliu: PAN • Roșu: Urgență</string>
+    <string name="radar_legend">Verde: Ateriz. • Albastru: Decol. • Mov: Militar (MIL) • Portocaliu: PAN • Roșu: Urgență</string>
 
     <string name="btn_start_monitor">Pornește monitorizarea 24/7</string>
     <string name="btn_stop_monitor">Oprește monitorizarea</string>
     <string name="btn_sim_landing">Sim. aterizare (18)</string>
     <string name="btn_sim_takeoff">Sim. decolare (36)</string>
-    <string name="btn_sim_emergency">Simulează urgență (7700 / PAN / 7600 / 7500)</string>
+    <string name="btn_sim_go_around">Sim. ratare (Go-Around)</string>
+    <string name="btn_sim_emergency">Sim. urgență (7700/PAN)</string>
 
     <string name="section_alerts">Notificări trafic &amp; urgențe</string>
     <string name="opt_notify_landing">Notifică la aterizări pe LRCK</string>
     <string name="opt_notify_takeoff">Notifică la decolări de pe LRCK</string>
     <string name="opt_notify_approach">Alertă timpurie la apropiere finală (&lt; 12 km)</string>
+    <string name="opt_notify_go_around">Notifică la ratare aterizare (Go-Around)</string>
+    <string name="desc_notify_go_around">Corelează automat cu METAR LRCK și starea pistei pentru un sumar cu motivul probabil.</string>
 
     <string name="section_emergency_codes">Alerte coduri de urgență (zboruri CND + rază 100 km)</string>
     <string name="opt_emg_7700">Cod 7700 — MAYDAY (Urgență generală)</string>
@@ -38,6 +42,11 @@
     <string name="desc_emg_7600">Defecțiune a stațiilor radio; aeronava nu poate comunica cu controlul de trafic aerian.</string>
     <string name="opt_emg_7500">Cod 7500 — Intervenție ilegală (HIJACK)</string>
     <string name="desc_emg_7500">Deturnare sau act de intervenție ilicită la bordul aeronavei.</string>
+
+    <string name="section_adsb_sources">Surse ADS-B gratuite &amp; zboruri militare (MLAT)</string>
+    <string name="adsb_sources_desc">Activ automat (0 cost): fuziune simultană adsb.lol + airplanes.live + adsb.fi + adsb.one + flux militar /v2/mil. Opțional, poți adăuga cheia gratuită FlyItalyADSB (flyitalyadsb.com — 300.000 cereri/lună) pentru recepție MLAT europeană suplimentară:</string>
+    <string name="hint_flyitaly_key">Cheie API gratuită FlyItalyADSB (opțional)</string>
+    <string name="btn_save_flyitaly_key">Salvează cheia</string>
 
     <string name="section_recent">Ultimele evenimente</string>
     <string name="btn_open_history">Vezi tot istoricul</string>
@@ -65,6 +74,7 @@
     <string name="filter_all">Toate</string>
     <string name="filter_landings">Aterizări</string>
     <string name="filter_takeoffs">Decolări</string>
+    <string name="filter_go_arounds">Ratări</string>
     <string name="filter_emergencies">Urgențe</string>
 
     <string name="preset_today">Azi</string>
@@ -80,7 +90,7 @@
     <string name="btn_export_pdf">Exportă PDF</string>
     <string name="btn_clear">Golește istoricul</string>
 
-    <string name="empty_events">Nu există încă evenimente. Apasă „Sim. aterizare” sau „Simulează urgență” pentru test.</string>
+    <string name="empty_events">Nu există încă evenimente. Apasă „Sim. aterizare” sau „Sim. ratare (Go-Around)” pentru test.</string>
     <string name="empty_search_results">Niciun zbor nu corespunde intervalului sau filtrelor selectate.</string>
 
     <!-- Raport zilnic -->
@@ -117,13 +127,51 @@
     <string name="btn_generate_daily_pdf">Generează PDF</string>
     <string name="btn_share_daily_pdf">Share WhatsApp / Email</string>
 
+    <string name="report_history_title">Istoric rapoarte generate</string>
+    <string name="report_history_empty">Nu există încă rapoarte generate. Fiecare raport PDF generat sau partajat va fi salvat automat aici.</string>
+    <string name="btn_report_history_open">Deschide PDF</string>
+    <string name="btn_report_history_share">Share</string>
+    <string name="btn_report_history_delete">Șterge</string>
+
+    <!-- Drone Dobrogea (DIMAP) -->
+    <string name="drone_header_title">Alerte drone — Sector Dobrogea</string>
+    <string name="drone_perimeter_desc">Perimetru monitorizat: frontiera Dunăre / Brațul Chilia (Isaccea – Plauru/Izmail – Chilia Veche – Periprava – Sulina) + apele teritoriale 12 NM Marea Neagră (până la Vama Veche).</string>
+    <string name="drone_disclaimer">Notă informativă: DIMAP este un agregator OSINT neoficial (nu are acces la radare militare). Alertele au rol strict informativ și nu înlocuiesc RO-Alert / MApN.</string>
+    <string name="opt_notify_drone_dobrogea">Activează alerte push pentru drone în zona Dobrogei</string>
+    <string name="drone_radius_label">Prag distanță alertă față de spațiul aerian al Dobrogei:</string>
+    <string name="drone_radius_5">5 km</string>
+    <string name="drone_radius_10">10 km</string>
+    <string name="drone_radius_20">20 km</string>
+    <string name="drone_radius_30">30 km</string>
+    <string name="btn_drone_poll_now">Verifică acum</string>
+    <string name="btn_drone_simulate">Simulează dronă (&lt; 10 km)</string>
+    <string name="drone_map_title">Hartă live DIMAP.LIVE</string>
+    <string name="btn_dimap_lite">Lite (rapid)</string>
+    <string name="btn_dimap_full">Complet</string>
+    <string name="btn_dimap_reload">Reîncarcă</string>
+    <string name="btn_dimap_browser">Browser</string>
+    <string name="drone_targets_title">Ținte monitorizate spre Dobrogea (&lt; 150 km)</string>
+    <string name="drone_targets_empty">Nu sunt raportate drone în apropierea Dobrogei. Poți apăsa „Simulează dronă” pentru a testa alerta sau poți configura URL-ul și cheia DIMAP-API mai jos.</string>
+    <string name="drone_alerts_history_title">Istoric alerte drone Dobrogea</string>
+    <string name="drone_alerts_history_empty">Nu există încă alerte înregistrate pentru sectorul Dobrogea.</string>
+    <string name="btn_clear_sim_drone_alerts">Șterge simulate</string>
+    <string name="btn_clear_all_drone_alerts">Golește lista</string>
+    <string name="drone_api_config_title">Sincronizare API oficial (DIMAP-API)</string>
+    <string name="drone_api_config_desc">Preconfigurat automat pe api.dimap.live/api/polling (cu fallback automat pe /targets — include țintele live + alertele de raion Izmail / Bolgrad / Bilhorod-Dnistrovskyi). Dacă endpoint-ul necesită cheie, o poți introduce mai jos.</string>
+    <string name="btn_request_dimap_key">Cere cheie @di_helper (Telegram)</string>
+    <string name="btn_request_ua_key">Cheie api.ukrainealarm.com</string>
+    <string name="hint_dimap_api_url">URL DIMAP-API (https://api.dimap.live/api/polling)</string>
+    <string name="hint_dimap_api_key">Cheie DIMAP-API (opțional dacă nu e solicitată)</string>
+    <string name="hint_ua_api_key">Cheie opțională UkraineAlarm API (backup Izmail / Odesa)</string>
+    <string name="btn_save_drone_config">Salvează configurarea</string>
+
     <!-- Despre -->
-    <string name="about_app_version">Versiunea 1.6.0 • Android</string>
+    <string name="about_app_version">Versiunea 2.0.4 • Android</string>
     <string name="about_desc_title">Descrierea aplicației</string>
-    <string name="about_desc_body">SAT - Monitorizare trafic CND este o aplicație dedicată monitorizării în timp real a traficului aerian și condițiilor de pistă ale Aeroportului Internațional „Mihail Kogălniceanu” Constanța (IATA: CND / ICAO: LRCK, Pista 18/36, 44.3622°N, 28.4883°E, elevație 353 ft).\n\nAplicația rulează un serviciu continuu în fundal (24/7), recuperează automat zborurile din perioadele offline prin OpenSky, trimite notificări pentru aterizări, decolări și coduri de urgență (7700, PAN-PAN, 7600, 7500 — CND + rază 100 km), afișează traficul pe hartă satelit cu date în clar (companie, origine, destinație), evaluează operabilitatea pistei pe scala 1–5 (METAR/TAF/RWYCC) și generează rapoarte zilnice PDF cu partajare directă pe WhatsApp/Email.</string>
+    <string name="about_desc_body">SAT - Monitorizare trafic CND este o aplicație dedicată monitorizării în timp real a traficului aerian civil și militar (ADS-B / MLAT), condițiilor de pistă ale Aeroportului Internațional „Mihail Kogălniceanu” Constanța (IATA: CND / ICAO: LRCK, Pista 18/36, 44.3622°N, 28.4883°E, elevație 353 ft) și alertelor informative de drone în sectorul Dobrogea.\n\nAplicația fuzionează în paralel 4+ rețele ADS-B gratuite nefiltrate (adsb.lol, airplanes.live, adsb.fi, adsb.one + flux militar /v2/mil + opțional FlyItalyADSB), recuperează automat zborurile din perioadele offline prin OpenSky, trimite notificări pentru aterizări, decolări, ratări de aterizare (Go-Around cu analiză live pistă/meteo), coduri de urgență (7700, PAN-PAN, 7600, 7500 — CND + rază 100 km) și drone apropiate la sub 10 km de Dobrogea (DIMAP.LIVE / DIMAP-API + Raion Izmail), evaluează operabilitatea pistei 1–5 și generează rapoarte zilnice PDF cu arhivare locală.</string>
     <string name="about_features_title">Funcționalități principale</string>
-    <string name="about_features_body">• Hartă satelit cu radar tactic live pe Pista 18/36 (zoom 15 / 25 / 45 / 100 km) și afișare în clar companie, origine și destinație la selecție\n• Switch individual cu descriere pentru fiecare tip de urgență: 7700, PAN-PAN, 7600, 7500 (CND + rază 100 km)\n• Recuperare automată a zborurilor ratate la reconectare (OpenSky) + sincronizare manuală\n• Stare pistă: buton operabilitate 1–5 (Verde → Roșu), METAR/TAF live LRCK, pistă recomandată de vânt, risc polei și evaluare RWYCC\n• Istoric (2.000 evenimente), ștergere selectivă a zborurilor simulate, căutare pe zile/ore și export .pdf\n• Raport zilnic (Turkish Airlines &amp; Wizz Air, supervizor, articole interzise, Alte date de interes) cu export .pdf și share WhatsApp / Email</string>
+    <string name="about_features_body">• Secțiune dedicată Drone Dobrogea: hartă live dimap.live încorporată, geofence exact Dunăre/Chilia + 12 NM Marea Neagră, alertă push &lt; 10 km (cu cheie oficială DIMAP-API + opțional UkraineAlarm Raion Izmail) și simulare test\n• Fuziune multi-rețea gratuită nefiltrată (adsb.lol + airplanes.live + adsb.fi + adsb.one + /v2/mil + opțional FlyItalyADSB) cu suport MLAT și evidențiere MIL pe radar\n• Alerte ratare aterizare (Go-Around) corelate live cu METAR LRCK, starea pistei/RWYCC și trafic, cu sumar al motivului probabil\n• Hartă satelit cu radar tactic live pe Pista 18/36 (zoom 15 / 25 / 45 / 100 km) și afișare în clar companie, origine și destinație la selecție\n• Switch individual cu descriere pentru fiecare tip de urgență: 7700, PAN-PAN, 7600, 7500 (CND + rază 100 km)\n• Recuperare automată a zborurilor ratate la reconectare (OpenSky) + sincronizare manuală\n• Stare pistă: buton operabilitate 1–5 (Verde → Roșu), METAR/TAF live LRCK, pistă recomandată de vânt, risc polei și evaluare RWYCC\n• Istoric (2.000 evenimente), ștergere selectivă a zborurilor simulate, căutare pe zile/ore și export .pdf\n• Raport zilnic (Turkish Airlines &amp; Wizz Air, supervizor, articole interzise, Alte date de interes) cu istoric rapoarte salvate, export .pdf și share WhatsApp / Email</string>
     <string name="about_ip_title">Proprietate intelectuală</string>
     <string name="about_ip_notice">Drept de proprietate intelectuală P. G. Petria.</string>
-    <string name="about_disclaimer">Notă: Aplicația are scop strict informativ și utilizează semnale ADS-B comunitare și date meteo publice METAR/TAF. Nu este destinată navigației aeriene sau utilizării operaționale.</string>
+    <string name="about_disclaimer">Notă: Aplicația are scop strict informativ și utilizează semnale ADS-B comunitare, date meteo publice METAR/TAF și surse OSINT publice. Nu este destinată navigației aeriene sau utilizării operaționale și nu înlocuiește RO-Alert / MApN.</string>
 </resources>

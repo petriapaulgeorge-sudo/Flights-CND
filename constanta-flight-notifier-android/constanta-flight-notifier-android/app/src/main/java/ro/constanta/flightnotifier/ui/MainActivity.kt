@@ -1,8 +1,12 @@
 package ro.constanta.flightnotifier.ui
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
@@ -14,7 +18,12 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
@@ -50,6 +59,7 @@ import ro.constanta.flightnotifier.core.AircraftRouteDetails
 import ro.constanta.flightnotifier.core.AirportConfig
 import ro.constanta.flightnotifier.core.DailyReportBuilder
 import ro.constanta.flightnotifier.core.DailyReportPdfExporter
+import ro.constanta.flightnotifier.core.DobrogeaDroneMonitor
 import ro.constanta.flightnotifier.core.EventSearch
 import ro.constanta.flightnotifier.core.PdfExporter
 import ro.constanta.flightnotifier.core.RunwayConditions
@@ -60,10 +70,13 @@ import ro.constanta.flightnotifier.data.LocalRunwayNote
 import ro.constanta.flightnotifier.model.ActiveAircraft
 import ro.constanta.flightnotifier.model.DailyFlightEntry
 import ro.constanta.flightnotifier.model.DailyReportData
+import ro.constanta.flightnotifier.model.DroneAlertRecord
+import ro.constanta.flightnotifier.model.DroneMonitorSnapshot
 import ro.constanta.flightnotifier.model.EventSearchFilter
 import ro.constanta.flightnotifier.model.FlightEvent
 import ro.constanta.flightnotifier.model.FlightEventType
 import ro.constanta.flightnotifier.model.ProhibitedItems
+import ro.constanta.flightnotifier.model.SavedDailyReport
 import ro.constanta.flightnotifier.notify.NotificationHelper
 import ro.constanta.flightnotifier.service.FlightMonitorService
 import java.io.File
@@ -77,6 +90,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var radarView: RadarCanvasView
     private lateinit var tvEmergencyBanner: TextView
+    private lateinit var tvRadarDroneBanner: TextView
     private lateinit var tvSelectedAircraft: TextView
     private lateinit var chipGroupZoom: ChipGroup
     private lateinit var tvStatus: TextView
@@ -88,16 +102,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var swLanding: SwitchMaterial
     private lateinit var swTakeoff: SwitchMaterial
     private lateinit var swApproach: SwitchMaterial
+    private lateinit var swGoAround: SwitchMaterial
     private lateinit var swEmg7700: SwitchMaterial
     private lateinit var swEmgPan: SwitchMaterial
     private lateinit var swEmg7600: SwitchMaterial
     private lateinit var swEmg7500: SwitchMaterial
+    private lateinit var etFlyItalyKey: TextInputEditText
     private lateinit var btnDeleteRecentSim: Button
     private lateinit var tabLayout: TabLayout
     private lateinit var paneRadar: View
     private lateinit var paneRunway: View
     private lateinit var paneHistory: View
     private lateinit var paneReport: View
+    private lateinit var paneDrone: View
     private lateinit var paneAbout: View
 
     // Stare pistă
@@ -146,6 +163,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etProhExplosives: EditText
     private lateinit var tvProhTotal: TextView
     private lateinit var etReportOtherNotes: TextInputEditText
+    private lateinit var tvReportHistoryEmpty: TextView
+    private lateinit var savedReportsContainer: LinearLayout
+
+    // Drone Dobrogea (DIMAP.LIVE)
+    private lateinit var tvDroneAlertBanner: TextView
+    private lateinit var swDroneDobrogea: SwitchMaterial
+    private lateinit var chipGroupDroneRadius: ChipGroup
+    private lateinit var tvDroneStatus: TextView
+    private lateinit var webViewDimap: WebView
+    private lateinit var tvDroneTargetsList: TextView
+    private lateinit var tvDroneAlertsHistory: TextView
+    private lateinit var etDimapApiUrl: TextInputEditText
+    private lateinit var etDimapApiKey: TextInputEditText
+    private lateinit var etUaApiKey: TextInputEditText
+    private var dimapWebLoadedOnce = false
+    private var currentDimapUrl: String = DobrogeaDroneMonitor.DIMAP_LITE_URL
 
     private lateinit var recentAdapter: EventsAdapter
     private lateinit var historyAdapter: EventsAdapter
@@ -218,7 +251,29 @@ class MainActivity : AppCompatActivity() {
         setupMonitorControls()
         setupHistorySearchControls()
         setupDailyReportControls()
+        setupDroneDobrogeaControls()
         observeState()
+        handleOpenTabIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleOpenTabIntent(intent)
+    }
+
+    override fun onDestroy() {
+        if (::webViewDimap.isInitialized) {
+            runCatching { webViewDimap.destroy() }
+        }
+        super.onDestroy()
+    }
+
+    private fun handleOpenTabIntent(intent: Intent?) {
+        val targetTab = intent?.getIntExtra(EXTRA_OPEN_TAB, -1) ?: -1
+        if (targetTab in 0 until tabLayout.tabCount) {
+            tabLayout.getTabAt(targetTab)?.select()
+        }
     }
 
     /**
@@ -253,6 +308,7 @@ class MainActivity : AppCompatActivity() {
     private fun bindViews() {
         radarView = findViewById(R.id.radar_view)
         tvEmergencyBanner = findViewById(R.id.tv_emergency_banner)
+        tvRadarDroneBanner = findViewById(R.id.tv_radar_drone_banner)
         tvSelectedAircraft = findViewById(R.id.tv_selected_aircraft)
         chipGroupZoom = findViewById(R.id.chip_group_zoom)
         tvStatus = findViewById(R.id.tv_status)
@@ -264,16 +320,19 @@ class MainActivity : AppCompatActivity() {
         swLanding = findViewById(R.id.switch_landing)
         swTakeoff = findViewById(R.id.switch_takeoff)
         swApproach = findViewById(R.id.switch_approach)
+        swGoAround = findViewById(R.id.switch_go_around)
         swEmg7700 = findViewById(R.id.switch_emg_7700)
         swEmgPan = findViewById(R.id.switch_emg_pan)
         swEmg7600 = findViewById(R.id.switch_emg_7600)
         swEmg7500 = findViewById(R.id.switch_emg_7500)
+        etFlyItalyKey = findViewById(R.id.et_flyitaly_key)
         btnDeleteRecentSim = findViewById(R.id.btn_delete_recent_sim)
         tabLayout = findViewById(R.id.tab_layout)
         paneRadar = findViewById(R.id.pane_radar)
         paneRunway = findViewById(R.id.pane_runway)
         paneHistory = findViewById(R.id.pane_history)
         paneReport = findViewById(R.id.pane_report)
+        paneDrone = findViewById(R.id.pane_drone)
         paneAbout = findViewById(R.id.pane_about)
 
         btnRwyOperability = findViewById(R.id.btn_rwy_operability)
@@ -322,6 +381,19 @@ class MainActivity : AppCompatActivity() {
         etProhExplosives = findViewById(R.id.et_proh_explosives)
         tvProhTotal = findViewById(R.id.tv_proh_total)
         etReportOtherNotes = findViewById(R.id.et_report_other_notes)
+        tvReportHistoryEmpty = findViewById(R.id.tv_report_history_empty)
+        savedReportsContainer = findViewById(R.id.saved_reports_container)
+
+        tvDroneAlertBanner = findViewById(R.id.tv_drone_alert_banner)
+        swDroneDobrogea = findViewById(R.id.switch_drone_dobrogea)
+        chipGroupDroneRadius = findViewById(R.id.chip_group_drone_radius)
+        tvDroneStatus = findViewById(R.id.tv_drone_status)
+        webViewDimap = findViewById(R.id.webview_dimap)
+        tvDroneTargetsList = findViewById(R.id.tv_drone_targets_list)
+        tvDroneAlertsHistory = findViewById(R.id.tv_drone_alerts_history)
+        etDimapApiUrl = findViewById(R.id.et_dimap_api_url)
+        etDimapApiKey = findViewById(R.id.et_dimap_api_key)
+        etUaApiKey = findViewById(R.id.et_ua_api_key)
 
         val openFlight: (FlightEvent) -> Unit = { evt ->
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(evt.adsbExchangeUrl)))
@@ -355,12 +427,22 @@ class MainActivity : AppCompatActivity() {
                 paneRunway.visibility = if (tab.position == 1) View.VISIBLE else View.GONE
                 paneHistory.visibility = if (tab.position == 2) View.VISIBLE else View.GONE
                 paneReport.visibility = if (tab.position == 3) View.VISIBLE else View.GONE
-                paneAbout.visibility = if (tab.position == 4) View.VISIBLE else View.GONE
+                paneDrone.visibility = if (tab.position == TAB_DRONE) View.VISIBLE else View.GONE
+                paneAbout.visibility = if (tab.position == 5) View.VISIBLE else View.GONE
                 if (tab.position == 1 && !runwayLoadedOnce) {
                     refreshRunwayConditions()
                 }
                 if (tab.position == 3) {
                     refreshDailyReportFlights(forceRender = false)
+                }
+                if (tab.position == TAB_DRONE && !dimapWebLoadedOnce) {
+                    dimapWebLoadedOnce = true
+                    webViewDimap.loadUrl(currentDimapUrl)
+                    if (FlightRepository.settings.value.hasAnyDroneSourceConfigured) {
+                        lifecycleScope.launch(Dispatchers.IO) {
+                            FlightMonitorService.pollDronesAndNotify(this@MainActivity)
+                        }
+                    }
                 }
             }
 
@@ -370,6 +452,10 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btn_open_history).setOnClickListener {
             tabLayout.getTabAt(2)?.select()
+        }
+
+        tvRadarDroneBanner.setOnClickListener {
+            tabLayout.getTabAt(TAB_DRONE)?.select()
         }
     }
 
@@ -437,20 +523,23 @@ class MainActivity : AppCompatActivity() {
         val sqStr = if (ac.squawk.isNotBlank()) " • SQ ${ac.squawk}" else ""
         val emInfo = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
         val emTag = if (emInfo != null) " • [${emInfo.shortBadge}]" else ""
+        val milTag = if (ac.military) " • [MILITAR]" else ""
+        val srcTag = if (ac.sourceType.contains("mlat", ignoreCase = true)) " • MLAT" else ""
 
         val airlineText = details?.airline?.takeIf { it.isNotBlank() }
             ?: ac.airlineHint?.takeIf { it.isNotBlank() }
             ?: AdsbClient.resolveKnownAirline(ac.callsign)
-            ?: if (loading) "Se caută…" else "Indisponibilă în baza ADS-B"
+            ?: if (loading) "Se caută…" else if (ac.military) "Aeronavă militară / de stat" else "Indisponibilă în baza ADS-B"
 
+        val noRouteText = if (ac.military) "Zbor militar (rută nepublică)" else "Indisponibilă (fără plan de zbor public)"
         val originText = details?.origin?.takeIf { it.isNotBlank() }
-            ?: if (loading) "Se caută…" else "Indisponibilă (fără plan de zbor public)"
+            ?: if (loading) "Se caută…" else noRouteText
 
         val destText = details?.destination?.takeIf { it.isNotBlank() }
-            ?: if (loading) "Se caută…" else "Indisponibilă (fără plan de zbor public)"
+            ?: if (loading) "Se caută…" else noRouteText
 
         tvSelectedAircraft.text = buildString {
-            append("${ac.callsign} • $model$regPart$sqStr$emTag\n")
+            append("${ac.callsign} • $model$regPart$sqStr$milTag$emTag$srcTag\n")
             append("Companie: $airlineText\n")
             append("Origine: $originText\n")
             append("Destinație: $destText\n")
@@ -665,10 +754,12 @@ class MainActivity : AppCompatActivity() {
         swLanding.isChecked = s.notifyLanding
         swTakeoff.isChecked = s.notifyTakeoff
         swApproach.isChecked = s.notifyApproach
+        swGoAround.isChecked = s.notifyGoAround
         swEmg7700.isChecked = s.notifyEmergency7700
         swEmgPan.isChecked = s.notifyEmergencyPan
         swEmg7600.isChecked = s.notifyEmergency7600
         swEmg7500.isChecked = s.notifyEmergency7500
+        etFlyItalyKey.setText(s.flyItalyApiKey)
 
         val saveToggle = {
             FlightRepository.updateSettings(
@@ -676,6 +767,7 @@ class MainActivity : AppCompatActivity() {
                     notifyLanding = swLanding.isChecked,
                     notifyTakeoff = swTakeoff.isChecked,
                     notifyApproach = swApproach.isChecked,
+                    notifyGoAround = swGoAround.isChecked,
                     notifyEmergency7700 = swEmg7700.isChecked,
                     notifyEmergencyPan = swEmgPan.isChecked,
                     notifyEmergency7600 = swEmg7600.isChecked,
@@ -686,10 +778,31 @@ class MainActivity : AppCompatActivity() {
         swLanding.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swTakeoff.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swApproach.setOnCheckedChangeListener { _, _ -> saveToggle() }
+        swGoAround.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swEmg7700.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swEmgPan.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swEmg7600.setOnCheckedChangeListener { _, _ -> saveToggle() }
         swEmg7500.setOnCheckedChangeListener { _, _ -> saveToggle() }
+
+        findViewById<Button>(R.id.btn_save_flyitaly_key).setOnClickListener {
+            val key = etFlyItalyKey.text?.toString()?.trim().orEmpty()
+            FlightRepository.updateSettings(
+                FlightRepository.settings.value.copy(flyItalyApiKey = key)
+            )
+            val msg = if (key.isNotEmpty()) {
+                "Cheia FlyItalyADSB a fost salvată și va fi inclusă automat în fuziunea radar."
+            } else {
+                "Cheia FlyItalyADSB a fost ștearsă (rămân active cele 4 rețele gratuite)."
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            if (FlightRepository.isMonitoring.value) {
+                startService(
+                    Intent(this, FlightMonitorService::class.java).apply {
+                        action = FlightMonitorService.ACTION_POLL_NOW
+                    }
+                )
+            }
+        }
 
         btnToggleMonitor.setOnClickListener {
             if (FlightRepository.isMonitoring.value) {
@@ -717,6 +830,22 @@ class MainActivity : AppCompatActivity() {
                     putExtra(FlightMonitorService.EXTRA_SIM_RUNWAY, "36")
                 }
             )
+        }
+
+        findViewById<Button>(R.id.btn_sim_go_around).setOnClickListener {
+            chipGroupZoom.check(R.id.chip_zoom_25)
+            ensureNotificationPermissionAndAction(
+                Intent(this, FlightMonitorService::class.java).apply {
+                    action = FlightMonitorService.ACTION_SIMULATE
+                    putExtra(FlightMonitorService.EXTRA_SIM_KIND, "go_around")
+                    putExtra(FlightMonitorService.EXTRA_SIM_RUNWAY, "18")
+                }
+            )
+            Toast.makeText(
+                this,
+                "Simulare Go-Around pornită pe RWY 18 (va corela automat cu METAR LRCK)…",
+                Toast.LENGTH_SHORT
+            ).show()
         }
 
         findViewById<Button>(R.id.btn_sim_emergency).setOnClickListener {
@@ -774,6 +903,7 @@ class MainActivity : AppCompatActivity() {
             val selectedType = when (checkedIds.firstOrNull()) {
                 R.id.chip_type_landing -> FlightEventType.LANDING
                 R.id.chip_type_takeoff -> FlightEventType.TAKEOFF
+                R.id.chip_type_go_around -> FlightEventType.GO_AROUND
                 R.id.chip_type_emergency -> FlightEventType.EMERGENCY
                 else -> null
             }
@@ -1139,17 +1269,18 @@ class MainActivity : AppCompatActivity() {
                     contentResolver.openOutputStream(uri)?.use { out ->
                         DailyReportPdfExporter.exportToStream(out, report)
                     } ?: error("Nu s-a putut deschide fișierul pentru scriere.")
+                    FlightRepository.archiveDailyReportPdf(this@MainActivity, report)
                 }
             }
             if (result.isSuccess) {
                 Toast.makeText(
                     this@MainActivity,
-                    "Raport zilnic PDF salvat (${report.dateLabel}).",
+                    "Raport zilnic PDF salvat și adăugat în Istoric rapoarte (${report.dateLabel}).",
                     Toast.LENGTH_LONG
                 ).show()
                 AlertDialog.Builder(this@MainActivity)
                     .setTitle("Raport zilnic PDF generat")
-                    .setMessage("Raportul pentru ${report.dateLabel} (Supervizor: ${report.supervisor}) a fost salvat. Vrei să îl deschizi acum?")
+                    .setMessage("Raportul pentru ${report.dateLabel} (Supervizor: ${report.supervisor}) a fost salvat și arhivat în secțiunea Istoric rapoarte. Vrei să îl deschizi acum?")
                     .setPositiveButton("Deschide PDF") { _, _ -> openPdfUri(uri) }
                     .setNegativeButton("Închide", null)
                     .show()
@@ -1165,20 +1296,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun shareDailyReportPdf() {
         val report = collectDailyReportData()
-        val stamp = SimpleDateFormat("yyyyMMdd", Locale.US).format(reportDateCal.time)
         lifecycleScope.launch {
             val fileResult = withContext(Dispatchers.IO) {
                 runCatching {
-                    val dir = File(cacheDir, "reports").apply { mkdirs() }
-                    val pdfFile = File(dir, "SAT_CND_Raport_Zilnic_$stamp.pdf")
-                    FileOutputStream(pdfFile).use { out ->
-                        DailyReportPdfExporter.exportToStream(out, report)
-                    }
-                    pdfFile
+                    FlightRepository.archiveDailyReportPdf(this@MainActivity, report)
                 }
             }
-            val pdfFile = fileResult.getOrNull()
-            if (pdfFile == null) {
+            val archived = fileResult.getOrNull()
+            if (archived == null) {
                 Toast.makeText(
                     this@MainActivity,
                     "Eroare pregătire PDF: ${fileResult.exceptionOrNull()?.message}",
@@ -1186,29 +1311,81 @@ class MainActivity : AppCompatActivity() {
                 ).show()
                 return@launch
             }
-
-            val contentUri = FileProvider.getUriForFile(
-                this@MainActivity,
-                "${packageName}.fileprovider",
-                pdfFile
-            )
-            val totPax = report.flights.sumOf { it.passengers }
-            val summaryText = buildString {
-                append("Raport zilnic SAT - Monitorizare trafic CND (${report.dateLabel})\n")
-                append("Supervizor: ${report.supervisor}\n")
-                append("Curse Turkish/Wizz: ${report.flights.size} | Pasageri: $totPax\n")
-                append("Articole interzise: ${report.prohibitedItems.total}")
-            }
-
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/pdf"
-                putExtra(Intent.EXTRA_STREAM, contentUri)
-                putExtra(Intent.EXTRA_SUBJECT, "Raport zilnic CND — ${report.dateLabel} (${report.supervisor})")
-                putExtra(Intent.EXTRA_TEXT, summaryText)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(shareIntent, "Trimite raportul pe WhatsApp / Email"))
+            shareSavedReportPdf(archived.first)
         }
+    }
+
+    private fun renderSavedReportsHistory(list: List<SavedDailyReport>) {
+        savedReportsContainer.removeAllViews()
+        tvReportHistoryEmpty.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+        if (list.isEmpty()) return
+
+        val dtFmt = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("ro", "RO"))
+        val inflater = LayoutInflater.from(this)
+        for (rec in list) {
+            val card = inflater.inflate(R.layout.item_saved_report, savedReportsContainer, false)
+            card.findViewById<TextView>(R.id.tv_sr_title).text =
+                "Raport ${rec.dateLabel}  •  Supervizor: ${rec.supervisor}"
+            val details = buildString {
+                append("Generat la ${dtFmt.format(Date(rec.createdAtMs))}")
+                append(" • ${rec.flightCount} curse • ${rec.totalPassengers} pax • ${rec.totalHoldBaggage} bag. • ${rec.totalPmr} PMR • ${rec.totalProhibited} art. interzise")
+                if (rec.otherNotesPreview.isNotBlank()) {
+                    append("\nAlte date: ${rec.otherNotesPreview}")
+                }
+            }
+            card.findViewById<TextView>(R.id.tv_sr_details).text = details
+
+            card.findViewById<Button>(R.id.btn_sr_open).setOnClickListener {
+                openSavedReportPdf(rec)
+            }
+            card.findViewById<Button>(R.id.btn_sr_share).setOnClickListener {
+                shareSavedReportPdf(rec)
+            }
+            card.findViewById<Button>(R.id.btn_sr_delete).setOnClickListener {
+                AlertDialog.Builder(this)
+                    .setTitle("Ștergi raportul din istoric?")
+                    .setMessage("Raportul din ${rec.dateLabel} (Supervizor: ${rec.supervisor}) va fi șters din arhiva locală.")
+                    .setPositiveButton("Șterge") { _, _ ->
+                        FlightRepository.deleteSavedReport(this, rec.id)
+                    }
+                    .setNegativeButton("Anulează", null)
+                    .show()
+            }
+            savedReportsContainer.addView(card)
+        }
+    }
+
+    private fun openSavedReportPdf(record: SavedDailyReport) {
+        val pdfFile = FlightRepository.getSavedReportFile(this, record)
+        if (!pdfFile.exists()) {
+            Toast.makeText(this, "Fișierul PDF nu mai există în arhiva locală.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val contentUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", pdfFile)
+        openPdfUri(contentUri)
+    }
+
+    private fun shareSavedReportPdf(record: SavedDailyReport) {
+        val pdfFile = FlightRepository.getSavedReportFile(this, record)
+        if (!pdfFile.exists()) {
+            Toast.makeText(this, "Fișierul PDF nu mai există în arhiva locală.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val contentUri = FileProvider.getUriForFile(this, "${packageName}.fileprovider", pdfFile)
+        val summaryText = buildString {
+            append("Raport zilnic SAT - Monitorizare trafic CND (${record.dateLabel})\n")
+            append("Supervizor: ${record.supervisor}\n")
+            append("Curse Turkish/Wizz: ${record.flightCount} | Pasageri: ${record.totalPassengers}\n")
+            append("Articole interzise: ${record.totalProhibited}")
+        }
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, contentUri)
+            putExtra(Intent.EXTRA_SUBJECT, "Raport zilnic CND — ${record.dateLabel} (${record.supervisor})")
+            putExtra(Intent.EXTRA_TEXT, summaryText)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(shareIntent, "Trimite raportul pe WhatsApp / Email"))
     }
 
     private fun openPdfUri(uri: Uri) {
@@ -1325,8 +1502,10 @@ class MainActivity : AppCompatActivity() {
 
         val landings = matches.count { it.type == FlightEventType.LANDING }
         val takeoffs = matches.count { it.type == FlightEventType.TAKEOFF }
+        val goArounds = matches.count { it.type == FlightEventType.GO_AROUND }
         val emergencies = matches.count { it.type == FlightEventType.EMERGENCY }
-        tvHistorySummary.text = "Rezultate: ${matches.size} (${landings} ateriz., ${takeoffs} decol., ${emergencies} urgențe)"
+        val gaPart = if (goArounds > 0) ", $goArounds ratări" else ""
+        tvHistorySummary.text = "Rezultate: ${matches.size} (${landings} ateriz., ${takeoffs} decol.$gaPart, ${emergencies} urgențe)"
     }
 
     private fun exportFilteredEventsToPdf(uri: Uri) {
@@ -1392,8 +1571,10 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                         val updated = snap.updatedAtMs?.let { clockFmt.format(Date(it)) } ?: "—"
+                        val milCount = snap.activeAircraft.count { it.military }
+                        val milPart = if (milCount > 0) " ($milCount MIL)" else ""
                         tvStatus.text = when {
-                            snap.providerOk -> "Live (${snap.provider}) • ${snap.activeAircraft.size} pe radar • $updated"
+                            snap.providerOk -> "Live (${snap.provider}) • ${snap.activeAircraft.size} pe radar$milPart • $updated"
                             snap.providerError != null -> "Sursă ADS-B indisponibilă temporar • $updated"
                             FlightRepository.isMonitoring.value -> "Se conectează la fluxul ADS-B…"
                             else -> "Monitorizare oprită. Apasă „Pornește monitorizarea 24/7”."
@@ -1404,6 +1585,7 @@ class MainActivity : AppCompatActivity() {
                                 it.phase == "emergency_pan" ||
                                 AirportConfig.emergencyInfo(it.squawk, it.emergencyStatus) != null
                         }
+                        val activeGoArounds = snap.activeAircraft.filter { it.phase == "go_around" }
                         if (activeEmergencies.isNotEmpty()) {
                             val hasCritical = activeEmergencies.any { ac ->
                                 val info = AirportConfig.emergencyInfo(ac.squawk, ac.emergencyStatus)
@@ -1417,6 +1599,12 @@ class MainActivity : AppCompatActivity() {
                                 val prefix = if (info?.code == "PAN") "ALERTĂ PAN-PAN" else "ALERTĂ URGENȚĂ"
                                 val desc = info?.description ?: "COD URGENȚĂ ${ac.squawk}"
                                 "$prefix: ${ac.callsign} • $desc • ${ac.distKm} km de LRCK (${ac.altAglFt ?: "—"} ft)"
+                            }
+                            tvEmergencyBanner.visibility = View.VISIBLE
+                        } else if (activeGoArounds.isNotEmpty()) {
+                            tvEmergencyBanner.setBackgroundColor(Color.parseColor("#E11D48"))
+                            tvEmergencyBanner.text = activeGoArounds.joinToString("\n") { ac ->
+                                "RATARE ATERIZARE (GO-AROUND): ${ac.callsign} • RWY ${ac.runway} • urcare ${ac.altAglFt ?: "—"} ft (${ac.gsKt ?: "—"} kt)"
                             }
                             tvEmergencyBanner.visibility = View.VISIBLE
                         } else {
@@ -1433,14 +1621,336 @@ class MainActivity : AppCompatActivity() {
                         btnDeleteAllSim.visibility = if (list.any { it.simulated }) View.VISIBLE else View.GONE
                         val landings = list.count { it.type == FlightEventType.LANDING }
                         val takeoffs = list.count { it.type == FlightEventType.TAKEOFF }
+                        val goArounds = list.count { it.type == FlightEventType.GO_AROUND }
                         val emergencies = list.count { it.type == FlightEventType.EMERGENCY }
-                        tvStats.text = "Total: ${list.size} • Aterizări: $landings • Decolări: $takeoffs • Urgențe: $emergencies"
+                        val gaPart = if (goArounds > 0) " • Ratări: $goArounds" else ""
+                        tvStats.text = "Total: ${list.size} • Aterizări: $landings • Decolări: $takeoffs$gaPart • Urgențe: $emergencies"
                         applyHistoryFilter()
                         refreshDailyReportFlights(forceRender = false)
                     }
                 }
+                launch {
+                    FlightRepository.savedReports.collect { savedList ->
+                        renderSavedReportsHistory(savedList)
+                    }
+                }
+                launch {
+                    FlightRepository.droneSnapshot.collect { droneSnap ->
+                        renderDroneSnapshot(droneSnap, clockFmt)
+                    }
+                }
+                launch {
+                    FlightRepository.droneAlerts.collect { alerts ->
+                        renderDroneAlertsHistory(alerts)
+                    }
+                }
             }
         }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
+    private fun setupDroneDobrogeaControls() {
+        val current = FlightRepository.settings.value
+        swDroneDobrogea.isChecked = current.notifyDroneDobrogea
+        etDimapApiUrl.setText(current.dimapApiUrl)
+        etDimapApiKey.setText(current.dimapApiKey)
+        etUaApiKey.setText(current.ukraineAlarmApiKey)
+
+        val initialChipId = when (current.droneAlertRadiusKm) {
+            5 -> R.id.chip_drone_radius_5
+            20 -> R.id.chip_drone_radius_20
+            30 -> R.id.chip_drone_radius_30
+            else -> R.id.chip_drone_radius_10
+        }
+        chipGroupDroneRadius.check(initialChipId)
+
+        swDroneDobrogea.setOnCheckedChangeListener { _, checked ->
+            val s = FlightRepository.settings.value
+            FlightRepository.updateSettings(s.copy(notifyDroneDobrogea = checked))
+        }
+
+        chipGroupDroneRadius.setOnCheckedStateChangeListener { _, checkedIds ->
+            val radiusKm = when (checkedIds.firstOrNull()) {
+                R.id.chip_drone_radius_5 -> 5
+                R.id.chip_drone_radius_20 -> 20
+                R.id.chip_drone_radius_30 -> 30
+                else -> 10
+            }
+            val s = FlightRepository.settings.value
+            FlightRepository.updateSettings(s.copy(droneAlertRadiusKm = radiusKm))
+            val snap = FlightRepository.droneSnapshot.value
+            val reFiltered = snap.nearbyTargets.filter {
+                it.insideDobrogea || it.distToDobrogeaKm <= radiusKm.toDouble()
+            }
+            FlightRepository.updateDroneSnapshot(snap.copy(alertTargets = reFiltered))
+        }
+
+        // Configurare sigură WebView pentru harta live DIMAP.LIVE
+        webViewDimap.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            builtInZoomControls = true
+            displayZoomControls = false
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            cacheMode = WebSettings.LOAD_DEFAULT
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        }
+        webViewDimap.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val uri = request?.url ?: return false
+                val host = uri.host?.lowercase(Locale.ROOT) ?: ""
+                if (uri.scheme == "https" && (host == "dimap.live" || host.endsWith(".dimap.live"))) {
+                    return false
+                }
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                return true
+            }
+        }
+        // Permite pan/zoom fluid pe harta DIMAP fără conflict cu NestedScrollView
+        webViewDimap.setOnTouchListener { v, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE ->
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
+
+        findViewById<Button>(R.id.btn_dimap_lite).setOnClickListener {
+            currentDimapUrl = DobrogeaDroneMonitor.DIMAP_LITE_URL
+            dimapWebLoadedOnce = true
+            webViewDimap.loadUrl(currentDimapUrl)
+        }
+        findViewById<Button>(R.id.btn_dimap_full).setOnClickListener {
+            currentDimapUrl = DobrogeaDroneMonitor.DIMAP_FULL_URL
+            dimapWebLoadedOnce = true
+            webViewDimap.loadUrl(currentDimapUrl)
+        }
+        findViewById<Button>(R.id.btn_dimap_reload).setOnClickListener {
+            dimapWebLoadedOnce = true
+            webViewDimap.loadUrl(currentDimapUrl)
+        }
+        findViewById<Button>(R.id.btn_dimap_browser).setOnClickListener {
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(currentDimapUrl)))
+            }
+        }
+
+        findViewById<Button>(R.id.btn_drone_poll_now).setOnClickListener {
+            val s = FlightRepository.settings.value
+            if (!s.hasAnyDroneSourceConfigured) {
+                Toast.makeText(
+                    this,
+                    "Adaugă mai întâi URL-ul și cheia DIMAP-API (sau cheia UkraineAlarm) mai jos.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
+            Toast.makeText(this, "Se verifică sursele Dobrogea…", Toast.LENGTH_SHORT).show()
+            lifecycleScope.launch(Dispatchers.IO) {
+                FlightMonitorService.pollDronesAndNotify(this@MainActivity)
+            }
+        }
+
+        findViewById<Button>(R.id.btn_drone_simulate).setOnClickListener {
+            showSimulateDobrogeaDroneDialog()
+        }
+
+        findViewById<Button>(R.id.btn_clear_sim_drone_alerts).setOnClickListener {
+            val removed = FlightRepository.clearSimulatedDroneAlerts()
+            val snap = FlightRepository.droneSnapshot.value
+            val cleanNearby = snap.nearbyTargets.filterNot { it.simulated }
+            val cleanAlerts = snap.alertTargets.filterNot { it.simulated }
+            FlightRepository.updateDroneSnapshot(
+                snap.copy(nearbyTargets = cleanNearby, alertTargets = cleanAlerts)
+            )
+            val msg = if (removed > 0) "Șterse $removed alerte simulate." else "Nu există alerte simulate."
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<Button>(R.id.btn_clear_all_drone_alerts).setOnClickListener {
+            FlightRepository.clearAllDroneAlerts()
+            Toast.makeText(this, "Istoricul alertelor drone a fost golit.", Toast.LENGTH_SHORT).show()
+        }
+
+        findViewById<Button>(R.id.btn_request_dimap_key).setOnClickListener {
+            showRequestDimapKeyDialog()
+        }
+
+        findViewById<Button>(R.id.btn_request_ua_key).setOnClickListener {
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DobrogeaDroneMonitor.UKRAINE_ALARM_PORTAL_URL)))
+            }
+        }
+
+        findViewById<Button>(R.id.btn_save_drone_config).setOnClickListener {
+            val urlVal = etDimapApiUrl.text?.toString()?.trim() ?: ""
+            val keyVal = etDimapApiKey.text?.toString()?.trim() ?: ""
+            val uaVal = etUaApiKey.text?.toString()?.trim() ?: ""
+
+            if (urlVal.isNotEmpty() && !urlVal.startsWith("https://") && !urlVal.startsWith("http://api.dimap.live/")) {
+                Toast.makeText(
+                    this,
+                    "URL-ul DIMAP-API trebuie să înceapă cu https:// (sau http://api.dimap.live/)",
+                    Toast.LENGTH_LONG
+                ).show()
+                return@setOnClickListener
+            }
+
+            val s = FlightRepository.settings.value
+            FlightRepository.updateSettings(
+                s.copy(
+                    dimapApiUrl = urlVal,
+                    dimapApiKey = keyVal,
+                    ukraineAlarmApiKey = uaVal
+                )
+            )
+            Toast.makeText(this, "Configurare API Dobrogea salvată.", Toast.LENGTH_SHORT).show()
+            if (urlVal.isNotBlank() || uaVal.isNotBlank()) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    FlightMonitorService.pollDronesAndNotify(this@MainActivity)
+                }
+            }
+        }
+    }
+
+    private fun showSimulateDobrogeaDroneDialog() {
+        val options = arrayOf(
+            "Dronă zona Izmail (~4.6 km de Plauru / Tulcea)",
+            "Dronă Marea Neagră (~3.9 km de Cap Midia 12 NM)",
+            "Dronă ÎN spațiul aerian Dobrogea (Delta Dunării)"
+        )
+        val scenarios = arrayOf("izmail", "sea", "inside")
+        AlertDialog.Builder(this)
+            .setTitle("Simulare alertă dronă — Dobrogea")
+            .setItems(options) { _, which ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                val scenario = scenarios[which]
+                lifecycleScope.launch(Dispatchers.IO) {
+                    FlightMonitorService.triggerSimulatedDobrogeaDrone(this@MainActivity, scenario)
+                }
+                Toast.makeText(
+                    this,
+                    "Alertă simulată declanșată pentru sectorul Dobrogea.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNegativeButton("Anulează", null)
+            .show()
+    }
+
+    private fun showRequestDimapKeyDialog() {
+        val template = "Hello! I saw on @di_ukraine that DIMAP-API is available for free with an API key.\n" +
+            "I am building a personal, non-commercial Android app for airspace awareness in Dobrogea, Romania (Tulcea / Constanța area).\n" +
+            "Could you please provide an API key, the endpoint URL, and the API documentation (or a sample JSON response)?\n" +
+            "Thank you very much for your work!"
+
+        AlertDialog.Builder(this)
+            .setTitle("Solicitare cheie gratuită DIMAP-API")
+            .setMessage("Poți copia mesajul de mai jos și să îl trimiți pe Telegram la @di_helper:\n\n$template")
+            .setPositiveButton("Copiază și deschide @di_helper") { _, _ ->
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("Cerere DIMAP-API", template))
+                Toast.makeText(this, "Mesaj copiat în clipboard.", Toast.LENGTH_SHORT).show()
+                runCatching {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(DobrogeaDroneMonitor.DIMAP_HELPER_TELEGRAM_URL)))
+                }
+            }
+            .setNegativeButton("Închide", null)
+            .show()
+    }
+
+    private fun renderDroneSnapshot(snap: DroneMonitorSnapshot, clockFmt: SimpleDateFormat) {
+        val thresholdKm = FlightRepository.settings.value.droneAlertRadiusKm
+        val updated = snap.updatedAtMs?.let { clockFmt.format(Date(it)) } ?: "—"
+
+        val statusLines = buildString {
+            append("Sector: Dobrogea (prag ≤ $thresholdKm km) • Actualizat: $updated\n")
+            append("DIMAP-API: ${snap.dimapStatus}\n")
+            append("Graniță Izmail/Odesa: ${snap.ukraineAlarmStatus}")
+        }
+        tvDroneStatus.text = statusLines
+
+        // Banner roșu atât în tab-ul Drone, cât și în tab-ul Radar (doar pentru drone <= prag sau alerte critice Izmail/ROȘU)
+        val bannerLines = mutableListOf<String>()
+        for (t in snap.alertTargets.take(3)) {
+            val simTag = if (t.simulated) " [TEST]" else ""
+            val loc = if (t.insideDobrogea) {
+                "ÎN DOBROGEA (${t.nearestLandmark})"
+            } else {
+                "${t.distToDobrogeaKm} km de ${t.nearestLandmark}"
+            }
+            bannerLines.add("ALERTĂ DRONĂ DOBROGEA$simTag: ${t.type} • $loc • ${t.distToCndKm} km ${t.bearingFromCnd} de CND")
+        }
+        for (alarm in snap.activeBorderAlarms.filter {
+            it.regionName.contains("Izmail", ignoreCase = true) ||
+                !it.alertType.contains("GALBEN", ignoreCase = true)
+        }.take(2)) {
+            bannerLines.add("ALERTĂ GRANIȚĂ DOBROGEA: ${alarm.regionName} (${alarm.alertType})")
+        }
+
+        if (bannerLines.isNotEmpty()) {
+            val bannerText = bannerLines.joinToString("\n")
+            tvDroneAlertBanner.text = bannerText
+            tvDroneAlertBanner.visibility = View.VISIBLE
+            tvRadarDroneBanner.text = "$bannerText\n(Apasă pentru a deschide tab-ul Drone & harta DIMAP)"
+            tvRadarDroneBanner.visibility = View.VISIBLE
+        } else {
+            tvDroneAlertBanner.visibility = View.GONE
+            tvRadarDroneBanner.visibility = View.GONE
+        }
+
+        // Lista țintelor apropiate (< 50 km de Dobrogea)
+        if (snap.nearbyTargets.isEmpty() && snap.activeBorderAlarms.isEmpty()) {
+            tvDroneTargetsList.text = getString(R.string.drone_targets_empty)
+        } else {
+            val sb = StringBuilder()
+            for (t in snap.nearbyTargets) {
+                val badge = when {
+                    t.insideDobrogea -> "[ÎN DOBROGEA]"
+                    t.distToDobrogeaKm <= thresholdKm -> "[ALERTĂ ≤ ${thresholdKm} km]"
+                    else -> "[APROPIERE]"
+                }
+                val simTag = if (t.simulated) " [TEST]" else ""
+                val distText = if (t.insideDobrogea) {
+                    "în spațiul aerian (${t.nearestLandmark})"
+                } else {
+                    "${t.distToDobrogeaKm} km de ${t.nearestLandmark}"
+                }
+                sb.append("$badge$simTag ${t.type}\n")
+                sb.append("  • Distanță Dobrogea: $distText\n")
+                sb.append("  • Față de CND: ${t.distToCndKm} km (${t.bearingFromCnd})")
+                if (t.courseDeg != null) sb.append(" • Curs: ${t.courseDeg}°")
+                if (t.speedKmh != null) sb.append(" • ~${t.speedKmh} km/h")
+                if (t.label.isNotBlank()) sb.append("\n  • ${t.label}")
+                sb.append("\n\n")
+            }
+            for (alarm in snap.activeBorderAlarms) {
+                sb.append("[ALERTĂ RAION GRANIȚĂ] ${alarm.regionName}\n")
+                sb.append("  • Tip: ${alarm.alertType} • Sursă: ${alarm.source}\n\n")
+            }
+            tvDroneTargetsList.text = sb.toString().trim()
+        }
+    }
+
+    private fun renderDroneAlertsHistory(alerts: List<DroneAlertRecord>) {
+        if (alerts.isEmpty()) {
+            tvDroneAlertsHistory.text = getString(R.string.drone_alerts_history_empty)
+            return
+        }
+        val fmt = SimpleDateFormat("dd.MM HH:mm:ss", Locale("ro", "RO"))
+        val text = alerts.take(20).joinToString("\n\n") { a ->
+            val stamp = fmt.format(Date(a.timestampMs))
+            "• [$stamp] ${a.title}\n  ${a.details} (${a.source})"
+        }
+        tvDroneAlertsHistory.text = text
     }
 
     private fun ensureNotificationPermissionAndStart() {
@@ -1476,5 +1986,10 @@ class MainActivity : AppCompatActivity() {
             action = FlightMonitorService.ACTION_STOP
         }
         startService(intent)
+    }
+
+    companion object {
+        const val EXTRA_OPEN_TAB = "open_tab"
+        const val TAB_DRONE = 4
     }
 }

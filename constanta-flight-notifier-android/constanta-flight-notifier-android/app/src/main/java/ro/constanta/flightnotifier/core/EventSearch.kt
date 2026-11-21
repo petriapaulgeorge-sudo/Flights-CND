@@ -24,6 +24,7 @@ object EventSearch {
                     evt.route,
                     evt.squawk,
                     evt.emergencyLabel,
+                    evt.goAroundSummary,
                     "rwy ${evt.runway}",
                     "pista ${evt.runway}"
                 ).joinToString(" ").lowercase()

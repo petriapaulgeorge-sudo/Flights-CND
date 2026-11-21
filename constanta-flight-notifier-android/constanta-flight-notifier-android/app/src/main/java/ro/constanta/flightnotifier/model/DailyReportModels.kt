@@ -37,3 +37,17 @@ data class DailyReportData(
     val prohibitedItems: ProhibitedItems,
     val otherNotes: String = ""
 )
+
+data class SavedDailyReport(
+    val id: String,
+    val createdAtMs: Long,
+    val dateLabel: String,
+    val supervisor: String,
+    val flightCount: Int,
+    val totalPassengers: Int,
+    val totalHoldBaggage: Int,
+    val totalPmr: Int,
+    val totalProhibited: Int,
+    val pdfFileName: String,
+    val otherNotesPreview: String = ""
+)

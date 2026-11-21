@@ -15,6 +15,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import ro.constanta.flightnotifier.R
+import ro.constanta.flightnotifier.core.DobrogeaDroneMonitor
+import ro.constanta.flightnotifier.model.BorderRegionAlarm
+import ro.constanta.flightnotifier.model.DroneTarget
 import ro.constanta.flightnotifier.model.FlightEvent
 import ro.constanta.flightnotifier.model.FlightEventType
 import ro.constanta.flightnotifier.service.FlightMonitorService
@@ -29,7 +32,9 @@ object NotificationHelper {
     const val CHANNEL_LANDING = "lrck_landings"
     const val CHANNEL_TAKEOFF = "lrck_takeoffs"
     const val CHANNEL_APPROACH = "lrck_approach"
+    const val CHANNEL_GO_AROUND = "lrck_go_around"
     const val CHANNEL_EMERGENCY = "lrck_emergency"
+    const val CHANNEL_DRONE_DOBROGEA = "dobrogea_drone_alerts"
     const val NOTIF_ID_MONITOR = 1001
 
     private var alertIdCounter = 2000
@@ -73,9 +78,19 @@ object NotificationHelper {
             description = "Alerte timpurii când o aeronavă intră pe finală spre LRCK"
         }
 
+        val goAroundChannel = NotificationChannel(
+            CHANNEL_GO_AROUND,
+            "Ratări aterizare / Go-Around (CND)",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Alerte când o aeronavă ratează aterizarea la LRCK, cu analiză live pistă și meteo"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 300, 150, 300)
+        }
+
         val emergencyChannel = NotificationChannel(
             CHANNEL_EMERGENCY,
-            "Coduri de urgență (7700 / 7600 / 7500)",
+            "Coduri de urgență (7700 / PAN / 7600 / 7500)",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Alerte critice pentru coduri transponder de urgență (zboruri CND și rază 100 km)"
@@ -85,8 +100,28 @@ object NotificationHelper {
             lightColor = Color.RED
         }
 
+        val droneDobrogeaChannel = NotificationChannel(
+            CHANNEL_DRONE_DOBROGEA,
+            "Alerte drone — Sector Dobrogea (< 10 km)",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Alerte informative OSINT (DIMAP / graniță Izmail) când o dronă se apropie de spațiul aerian al Dobrogei"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 500, 150, 500, 150, 700)
+            enableLights(true)
+            lightColor = Color.RED
+        }
+
         nm.createNotificationChannels(
-            listOf(monitorChannel, landingChannel, takeoffChannel, approachChannel, emergencyChannel)
+            listOf(
+                monitorChannel,
+                landingChannel,
+                takeoffChannel,
+                approachChannel,
+                goAroundChannel,
+                emergencyChannel,
+                droneDobrogeaChannel
+            )
         )
     }
 
@@ -135,6 +170,7 @@ object NotificationHelper {
             FlightEventType.LANDING -> CHANNEL_LANDING to "Aterizare la Constanța (CND)"
             FlightEventType.TAKEOFF -> CHANNEL_TAKEOFF to "Decolare de la Constanța (CND)"
             FlightEventType.APPROACH -> CHANNEL_APPROACH to "Apropiere finală spre Constanța"
+            FlightEventType.GO_AROUND -> CHANNEL_GO_AROUND to "RATARE ATERIZARE (Go-Around) — CND"
             FlightEventType.EMERGENCY -> CHANNEL_EMERGENCY to (
                 if (emCode == "PAN") "ALERTĂ URGENȚĂ PAN-PAN"
                 else "ALERTĂ URGENȚĂ COD $emCode"
@@ -145,14 +181,18 @@ object NotificationHelper {
         val title = "$titlePrefix$simTag"
         val timeFmt = SimpleDateFormat("HH:mm:ss", Locale("ro", "RO")).format(Date(event.timestampMs))
 
-        val summaryLine = if (event.type == FlightEventType.EMERGENCY) {
-            listOfNotNull(
+        val summaryLine = when (event.type) {
+            FlightEventType.EMERGENCY -> listOfNotNull(
                 event.callsign,
                 event.emergencyLabel ?: "Urgență $emCode",
                 "${event.distKm} km de LRCK"
             ).joinToString(" • ")
-        } else {
-            listOfNotNull(
+            FlightEventType.GO_AROUND -> listOfNotNull(
+                event.callsign,
+                "RWY ${event.runway}",
+                event.goAroundSummary?.take(90) ?: "Ratare de aterizare detectată"
+            ).joinToString(" • ")
+            else -> listOfNotNull(
                 event.callsign,
                 event.airline,
                 event.aircraftType,
@@ -163,6 +203,9 @@ object NotificationHelper {
         val bigText = buildString {
             if (event.type == FlightEventType.EMERGENCY && !event.emergencyLabel.isNullOrBlank()) {
                 append("URGENT: ${event.emergencyLabel}\n")
+            }
+            if (event.type == FlightEventType.GO_AROUND && !event.goAroundSummary.isNullOrBlank()) {
+                append("${event.goAroundSummary}\n\n")
             }
             append("Indicativ: ${event.callsign}")
             if (!event.airline.isNullOrBlank()) append("\nOperator: ${event.airline}")
@@ -214,6 +257,8 @@ object NotificationHelper {
                 if (emCode == "PAN") Color.parseColor("#EA580C")
                 else Color.parseColor("#DC2626")
             )
+        } else if (event.type == FlightEventType.GO_AROUND) {
+            builder.setColor(Color.parseColor("#E11D48"))
         }
 
         alertIdCounter += 2
@@ -243,5 +288,129 @@ object NotificationHelper {
             .setContentIntent(openIntent)
             .build()
         NotificationManagerCompat.from(context).notify(9001, notif)
+    }
+
+    fun notifyDobrogeaDroneAlert(context: Context, target: DroneTarget, thresholdKm: Int) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) return
+        }
+
+        val simTag = if (target.simulated) " [TEST]" else ""
+        val title = if (target.insideDobrogea) {
+            "ALERTĂ DRONĂ ÎN DOBROGEA$simTag"
+        } else {
+            "ALERTĂ DRONĂ < $thresholdKm KM DE DOBROGEA$simTag"
+        }
+
+        val distPart = if (target.insideDobrogea) {
+            "ÎN SPAȚIUL AERIAN DOBROGEA (zona ${target.nearestLandmark})"
+        } else {
+            "${target.distToDobrogeaKm} km de ${target.nearestLandmark}"
+        }
+        val summaryLine = "${target.type} • $distPart"
+        val timeFmt = SimpleDateFormat("HH:mm:ss", Locale("ro", "RO")).format(Date(target.timestampMs))
+
+        val bigText = buildString {
+            append("$distPart\n")
+            append("Tip țintă: ${target.type}\n")
+            append("Distanță față de Aeroport CND: ${target.distToCndKm} km (${target.bearingFromCnd})")
+            if (target.courseDeg != null || target.speedKmh != null) {
+                val c = target.courseDeg?.let { "${it}°" } ?: "—"
+                val s = target.speedKmh?.let { "$it km/h" } ?: "—"
+                append("\nCurs: $c • Viteză estimată: $s")
+            }
+            if (target.label.isNotBlank()) {
+                append("\nDetalii sursă: ${target.label}")
+            }
+            append("\nSursă: ${target.source} • Ora: $timeFmt")
+            append("\n(Alertă OSINT informativă — verificați RO-Alert / MApN)")
+        }
+
+        val openDroneTabIntent = PendingIntent.getActivity(
+            context,
+            alertIdCounter,
+            Intent(context, MainActivity::class.java).apply {
+                putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_DRONE)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val openDimapIntent = PendingIntent.getActivity(
+            context,
+            alertIdCounter + 1,
+            Intent(Intent.ACTION_VIEW, Uri.parse(DobrogeaDroneMonitor.DIMAP_LITE_URL)),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notif = NotificationCompat.Builder(context, CHANNEL_DRONE_DOBROGEA)
+            .setSmallIcon(R.drawable.ic_plane_notif)
+            .setContentTitle(title)
+            .setContentText(summaryLine)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setColor(Color.parseColor("#DC2626"))
+            .setAutoCancel(true)
+            .setContentIntent(openDroneTabIntent)
+            .addAction(0, "Deschide dimap.live", openDimapIntent)
+            .build()
+
+        alertIdCounter += 2
+        NotificationManagerCompat.from(context).notify(alertIdCounter, notif)
+    }
+
+    fun notifyDobrogeaBorderAlarm(context: Context, alarm: BorderRegionAlarm) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val granted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) return
+        }
+
+        val openDroneTabIntent = PendingIntent.getActivity(
+            context,
+            alertIdCounter,
+            Intent(context, MainActivity::class.java).apply {
+                putExtra(MainActivity.EXTRA_OPEN_TAB, MainActivity.TAB_DRONE)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val openDimapIntent = PendingIntent.getActivity(
+            context,
+            alertIdCounter + 1,
+            Intent(Intent.ACTION_VIEW, Uri.parse(DobrogeaDroneMonitor.DIMAP_LITE_URL)),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = "ALERTĂ AERIANĂ LA GRANIȚA DOBROGEI"
+        val summary = "${alarm.regionName} (${alarm.alertType})"
+        val bigText = buildString {
+            append("Alertă activă: ${alarm.regionName}\n")
+            append("Tip alertă: ${alarm.alertType}\n")
+            append("Sursă: ${alarm.source} (api.ukrainealarm.com)\n")
+            append("Deschide harta live dimap.live în tab-ul Drone pentru monitorizare vizuală.\n")
+            append("(Alertă informativă — urmăriți RO-Alert / MApN)")
+        }
+
+        val notif = NotificationCompat.Builder(context, CHANNEL_DRONE_DOBROGEA)
+            .setSmallIcon(R.drawable.ic_plane_notif)
+            .setContentTitle(title)
+            .setContentText(summary)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setColor(Color.parseColor("#DC2626"))
+            .setAutoCancel(true)
+            .setContentIntent(openDroneTabIntent)
+            .addAction(0, "Deschide dimap.live", openDimapIntent)
+            .build()
+
+        alertIdCounter += 2
+        NotificationManagerCompat.from(context).notify(alertIdCounter, notif)
     }
 }

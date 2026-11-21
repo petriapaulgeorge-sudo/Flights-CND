@@ -435,6 +435,100 @@ object RunwayStatusClient {
         )
     }
 
+    /**
+     * Corelează un eveniment Go-Around (ratare de aterizare) cu condițiile METAR live LRCK,
+     * vântul specific pe pista încercată (18 sau 36), starea locală a pistei (RWYCC) și
+     * traficul recent pe pistă, generând un sumar cu motivul probabil.
+     */
+    fun analyzeGoAroundReason(
+        runway: String,
+        minApproachAltFt: Int?,
+        conditions: RunwayConditions?,
+        localOperationalState: String = "Operațională",
+        localRwyccCode: String = "6 — Uscat",
+        localNote: String = "",
+        recentRunwayTraffic: Boolean = false
+    ): String {
+        val op = evaluateOperability(conditions, localOperationalState, localRwyccCode)
+        val reasons = mutableListOf<String>()
+
+        // 1. Stare locală a pistei & RWYCC
+        when {
+            localOperationalState.contains("Închis", ignoreCase = true) ->
+                reasons.add("pistă marcată local ÎNCHISĂ")
+            localOperationalState.contains("Restricț", ignoreCase = true) ->
+                reasons.add("pistă marcată local Restricționată")
+        }
+        val rwyccDigit = localRwyccCode.trim().firstOrNull()?.digitToIntOrNull() ?: 6
+        if (rwyccDigit <= 3) {
+            reasons.add("frânare/aderență redusă pe pistă (RWYCC $rwyccDigit)")
+        }
+
+        // 2. Date meteo live METAR LRCK corelate cu pista încercată (18 vs 36)
+        if (conditions != null && conditions.ok) {
+            if (conditions.hasSnoclo) {
+                reasons.add("pistă contaminată / închisă din cauza zăpezii (SNOCLO)")
+            }
+            if (conditions.hasThunderstorm) {
+                reasons.add("furtună / risc forfecare vânt (windshear: ${conditions.weatherPhenomena})")
+            }
+
+            val rwyWind = when (runway) {
+                "18" -> conditions.rwy18Wind
+                "36" -> conditions.rwy36Wind
+                else -> null
+            }
+            if (rwyWind != null) {
+                if (rwyWind.headwindKt <= -8) {
+                    reasons.add("vânt din spate pe Pista $runway (${-rwyWind.headwindKt} kt tailwind)")
+                }
+                if (rwyWind.crosswindKt >= 18) {
+                    reasons.add("vânt lateral puternic pe Pista $runway (${rwyWind.crosswindKt} kt crosswind)")
+                }
+            }
+            val gust = conditions.windGustKt
+            val spd = conditions.windSpeedKt ?: 0
+            if (gust != null && (gust >= 24 || gust - spd >= 10)) {
+                reasons.add("rafale puternice / turbulență la sol (${conditions.windSummary})")
+            }
+
+            val vis = conditions.visibilityMeters
+            val ceil = conditions.lowestCeilingFt
+            if (conditions.flightCategory == "LIFR" || conditions.flightCategory == "IFR" ||
+                (vis != null && vis < 2400) || (ceil != null && ceil < 600)
+            ) {
+                reasons.add("vizibilitate/plafon sub minime (${conditions.flightCategory}: viz. ${conditions.visibilityText}, ${conditions.ceilingText})")
+            }
+
+            if (conditions.hasFreezingPrecip) {
+                reasons.add("precipitații înghețate / zăpadă (${conditions.weatherPhenomena})")
+            } else if (conditions.icingRisk) {
+                reasons.add("risc de polei / îngheț pe pistă (${conditions.tempDewText})")
+            } else if (conditions.hasRain) {
+                reasons.add("suprafață umedă — ploaie activă (${conditions.weatherPhenomena})")
+            }
+        }
+
+        // 3. Trafic recent pe pistă
+        if (recentRunwayTraffic) {
+            reasons.add("posibilă pistă ocupată temporar de alt trafic / separare ATC")
+        }
+
+        val altNote = minApproachAltFt?.let { "Altitudine minimă atinsă: ~$it ft AGL. " } ?: ""
+        val notePart = if (localNote.isNotBlank()) " Obs. pistă: ${localNote.trim()}." else ""
+
+        return if (reasons.isNotEmpty()) {
+            "${altNote}Motiv probabil (Operabilitate ${op.level}/5): ${reasons.joinToString("; ")}.$notePart"
+        } else {
+            val meteoOk = if (conditions != null && conditions.ok) {
+                "${conditions.flightCategory}, vânt ${conditions.windSummary}, RWYCC $rwyccDigit"
+            } else {
+                "stare locală $localOperationalState, RWYCC $rwyccDigit"
+            }
+            "${altNote}Condiții meteo/pistă bune (Operabilitate ${op.level}/5: $meteoOk) — motiv probabil: abordare nestabilizată, pistă ocupată temporar / instrucțiune ATC sau exercițiu (touch-and-go).$notePart"
+        }
+    }
+
     private fun computeWindComponent(runway: String, rwyHeadingDeg: Int, windDirDeg: Int, speedKt: Int): RunwayWindComponent {
         val diffRad = Math.toRadians((windDirDeg - rwyHeadingDeg).toDouble())
         val headwind = (speedKt * cos(diffRad)).roundToInt()

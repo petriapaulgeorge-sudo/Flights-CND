@@ -32,6 +32,11 @@ object AirportConfig {
     const val TOUCHDOWN_LOSS_ALT_AGL_FT = 1600
     const val APPROACH_ALERT_DIST_KM = 12.0
     const val APPROACH_ALERT_MAX_ALT_AGL_FT = 3200
+    const val GO_AROUND_MAX_MIN_ALT_FT = 1800
+    const val GO_AROUND_MAX_APPROACH_DIST_KM = 8.5
+    const val GO_AROUND_MAX_DIST_KM = 14.0
+    const val GO_AROUND_MIN_CLIMB_RATE_FPM = 600
+    const val GO_AROUND_MIN_ALT_GAIN_FT = 220
     const val MIN_AIRBORNE_SPEED_KT = 65
     const val MIN_CLIMB_RATE_FPM = 300
     const val MIN_DESCENT_RATE_FPM = -250

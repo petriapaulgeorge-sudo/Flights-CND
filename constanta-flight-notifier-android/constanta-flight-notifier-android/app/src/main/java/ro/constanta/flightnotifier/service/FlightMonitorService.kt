@@ -17,7 +17,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ro.constanta.flightnotifier.core.AdsbClient
+import ro.constanta.flightnotifier.core.DobrogeaDroneMonitor
 import ro.constanta.flightnotifier.data.FlightRepository
+import ro.constanta.flightnotifier.model.DroneAlertRecord
 import ro.constanta.flightnotifier.model.FeedSnapshot
 import ro.constanta.flightnotifier.model.FlightEventType
 import ro.constanta.flightnotifier.model.RawAircraft
@@ -27,6 +29,7 @@ class FlightMonitorService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var pollJob: Job? = null
+    private var dronePollJob: Job? = null
     private var simJob: Job? = null
 
     @Volatile
@@ -77,7 +80,7 @@ class FlightMonitorService : Service() {
                 return START_STICKY
             }
             else -> {
-                startForegroundSafe("Monitorizare ADS-B activă în jurul LRCK…")
+                startForegroundSafe("Monitorizare ADS-B & Dobrogea activă…")
                 FlightRepository.setMonitoring(true)
                 if (pollJob?.isActive != true) {
                     startPollLoop()
@@ -114,6 +117,20 @@ class FlightMonitorService : Service() {
                 delay(intervalMs)
             }
         }
+        startDronePollLoop()
+    }
+
+    private fun startDronePollLoop() {
+        dronePollJob?.cancel()
+        dronePollJob = scope.launch {
+            while (isActive) {
+                val settings = FlightRepository.settings.value
+                if (settings.notifyDroneDobrogea && settings.hasAnyDroneSourceConfigured) {
+                    pollDronesAndNotify(this@FlightMonitorService)
+                }
+                delay(20_000L)
+            }
+        }
     }
 
     private fun ensureSimLoop() {
@@ -135,9 +152,12 @@ class FlightMonitorService : Service() {
         val effectiveRadiusNm = if (settings.anyEmergencyEnabled) {
             maxOf(settings.pollRadiusNm, ro.constanta.flightnotifier.core.AirportConfig.EMERGENCY_POLL_RADIUS_NM)
         } else {
-            settings.pollRadiusNm
+            maxOf(settings.pollRadiusNm, ro.constanta.flightnotifier.core.AirportConfig.EMERGENCY_POLL_RADIUS_NM)
         }
-        val result = AdsbClient.fetchLiveAircraft(effectiveRadiusNm)
+        val result = AdsbClient.fetchLiveAircraft(
+            radiusNm = effectiveRadiusNm,
+            flyItalyApiKey = settings.flyItalyApiKey
+        )
         val nowMs = System.currentTimeMillis()
         if (result.ok) {
             val prevOnlineMs = FlightRepository.getLastOnlineSyncMs()
@@ -207,6 +227,7 @@ class FlightMonitorService : Service() {
                 FlightEventType.LANDING -> settings.notifyLanding
                 FlightEventType.TAKEOFF -> settings.notifyTakeoff
                 FlightEventType.APPROACH -> settings.notifyApproach
+                FlightEventType.GO_AROUND -> settings.notifyGoAround
                 FlightEventType.EMERGENCY -> when (rawEvt.emergencyCode ?: rawEvt.squawk) {
                     "7700" -> settings.notifyEmergency7700
                     "PAN" -> settings.notifyEmergencyPan
@@ -217,7 +238,30 @@ class FlightMonitorService : Service() {
             }
             if (!shouldNotify) continue
 
-            val enriched = if (rawEvt.simulated) rawEvt else AdsbClient.enrichEvent(rawEvt)
+            var enriched = if (rawEvt.simulated) rawEvt else AdsbClient.enrichEvent(rawEvt)
+            if (enriched.type == FlightEventType.GO_AROUND) {
+                val liveCond = runCatching {
+                    ro.constanta.flightnotifier.core.RunwayStatusClient.fetchLiveRunwayConditions()
+                }.getOrNull()
+                val localNote = FlightRepository.getLocalRunwayNote()
+                val otherOnRunway = detection.activeAircraft.any { other ->
+                    other.hex != enriched.hex && other.onGround && other.distKm <= 3.0
+                } || FlightRepository.events.value.any { prev ->
+                    prev.hex != enriched.hex &&
+                        (prev.type == FlightEventType.LANDING || prev.type == FlightEventType.TAKEOFF) &&
+                        (nowMs - prev.timestampMs) in 0L..180_000L
+                }
+                val summary = ro.constanta.flightnotifier.core.RunwayStatusClient.analyzeGoAroundReason(
+                    runway = enriched.runway,
+                    minApproachAltFt = enriched.minApproachAltFt,
+                    conditions = liveCond,
+                    localOperationalState = localNote.operationalState,
+                    localRwyccCode = localNote.rwyccCode,
+                    localNote = localNote.note,
+                    recentRunwayTraffic = otherOnRunway
+                )
+                enriched = enriched.copy(goAroundSummary = summary)
+            }
             FlightRepository.addEvent(enriched)
             NotificationHelper.notifyFlightEvent(this, enriched)
         }
@@ -238,5 +282,129 @@ class FlightMonitorService : Service() {
         const val ACTION_SIMULATE = "ro.constanta.flightnotifier.ACTION_SIMULATE"
         const val EXTRA_SIM_KIND = "sim_kind"
         const val EXTRA_SIM_RUNWAY = "sim_runway"
+
+        /**
+         * Interoghează sursele configurate pentru zona Dobrogei (DIMAP-API + UkraineAlarm Izmail/Odesa),
+         * actualizează snapshot-ul live și emite notificări push pentru țintele <= pragul configurat (implicit 10 km).
+         */
+        fun pollDronesAndNotify(context: Context) {
+            FlightRepository.init(context)
+            NotificationHelper.ensureChannels(context)
+            val settings = FlightRepository.settings.value
+            val nowMs = System.currentTimeMillis()
+            val snap = DobrogeaDroneMonitor.pollDobrogeaSources(
+                dimapApiUrl = settings.dimapApiUrl,
+                dimapApiKey = settings.dimapApiKey,
+                ukraineAlarmApiKey = settings.ukraineAlarmApiKey,
+                alertRadiusKm = settings.droneAlertRadiusKm,
+                nowMs = nowMs
+            )
+            FlightRepository.updateDroneSnapshot(snap)
+
+            if (!settings.notifyDroneDobrogea) return
+
+            val freshDrones = FlightRepository.droneTracker.filterNewDroneAlerts(snap.alertTargets, nowMs)
+            for (target in freshDrones) {
+                val title = if (target.insideDobrogea) {
+                    "DRONĂ ÎN SPAȚIUL AERIAN DOBROGEA"
+                } else {
+                    "DRONĂ LA ${target.distToDobrogeaKm} KM DE DOBROGEA"
+                }
+                val details = buildString {
+                    append("${target.type} • Reper: ${target.nearestLandmark}")
+                    append(" • ${target.distToCndKm} km ${target.bearingFromCnd} de CND")
+                    if (target.courseDeg != null) append(" • Curs ${target.courseDeg}°")
+                    if (target.label.isNotBlank()) append(" • ${target.label}")
+                }
+                FlightRepository.addDroneAlert(
+                    DroneAlertRecord(
+                        id = "dr_${target.id}_$nowMs",
+                        timestampMs = nowMs,
+                        title = title,
+                        details = details,
+                        distToDobrogeaKm = target.distToDobrogeaKm,
+                        insideDobrogea = target.insideDobrogea,
+                        landmark = target.nearestLandmark,
+                        source = target.source,
+                        simulated = target.simulated
+                    )
+                )
+                NotificationHelper.notifyDobrogeaDroneAlert(context, target, settings.droneAlertRadiusKm)
+            }
+
+            val highPriorityBorderAlarms = snap.activeBorderAlarms.filter { alarm ->
+                alarm.regionName.contains("Izmail", ignoreCase = true) ||
+                    !alarm.alertType.contains("GALBEN", ignoreCase = true)
+            }
+            val freshBorderAlarms = FlightRepository.droneTracker.filterNewBorderAlarms(highPriorityBorderAlarms)
+            for (alarm in freshBorderAlarms) {
+                FlightRepository.addDroneAlert(
+                    DroneAlertRecord(
+                        id = "ua_${alarm.regionId}_$nowMs",
+                        timestampMs = nowMs,
+                        title = "ALERTĂ AERIANĂ GRANIȚĂ DOBROGEA",
+                        details = "${alarm.regionName} • Tip: ${alarm.alertType}",
+                        distToDobrogeaKm = null,
+                        insideDobrogea = false,
+                        landmark = alarm.regionName,
+                        source = alarm.source,
+                        simulated = false
+                    )
+                )
+                NotificationHelper.notifyDobrogeaBorderAlarm(context, alarm)
+            }
+        }
+
+        /**
+         * Simulează o dronă care se apropie la < 10 km de Dobrogea (sau intră în spațiul aerian)
+         * pentru verificarea notificării push, a calculului de distanță și a bannerului live.
+         */
+        fun triggerSimulatedDobrogeaDrone(context: Context, scenario: String = "izmail") {
+            FlightRepository.init(context)
+            NotificationHelper.ensureChannels(context)
+            val nowMs = System.currentTimeMillis()
+            val settings = FlightRepository.settings.value
+            val simTarget = DobrogeaDroneMonitor.createSimulatedDobrogeaDrone(scenario, nowMs)
+
+            val prev = FlightRepository.droneSnapshot.value
+            val nextNearby = (listOf(simTarget) + prev.nearbyTargets.filterNot { it.simulated })
+                .sortedBy { it.distToDobrogeaKm }
+            val nextAlerts = nextNearby.filter {
+                it.insideDobrogea || it.distToDobrogeaKm <= settings.droneAlertRadiusKm.toDouble()
+            }
+            FlightRepository.updateDroneSnapshot(
+                prev.copy(
+                    updatedAtMs = nowMs,
+                    nearbyTargets = nextNearby,
+                    alertTargets = nextAlerts
+                )
+            )
+
+            val title = if (simTarget.insideDobrogea) {
+                "DRONĂ ÎN DOBROGEA [SIMULARE]"
+            } else {
+                "DRONĂ LA ${simTarget.distToDobrogeaKm} KM DE DOBROGEA [SIMULARE]"
+            }
+            val details = buildString {
+                append("${simTarget.type} • Reper: ${simTarget.nearestLandmark}")
+                append(" • ${simTarget.distToCndKm} km ${simTarget.bearingFromCnd} de CND")
+                if (simTarget.courseDeg != null) append(" • Curs ${simTarget.courseDeg}°")
+                if (simTarget.label.isNotBlank()) append(" • ${simTarget.label}")
+            }
+            FlightRepository.addDroneAlert(
+                DroneAlertRecord(
+                    id = "sim_${simTarget.id}_$nowMs",
+                    timestampMs = nowMs,
+                    title = title,
+                    details = details,
+                    distToDobrogeaKm = simTarget.distToDobrogeaKm,
+                    insideDobrogea = simTarget.insideDobrogea,
+                    landmark = simTarget.nearestLandmark,
+                    source = "SIMULARE",
+                    simulated = true
+                )
+            )
+            NotificationHelper.notifyDobrogeaDroneAlert(context, simTarget, settings.droneAlertRadiusKm)
+        }
     }
 }

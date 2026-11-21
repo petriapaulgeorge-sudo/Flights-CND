@@ -122,6 +122,7 @@ object PdfExporter {
                     FlightEventType.LANDING -> "Doar aterizări"
                     FlightEventType.TAKEOFF -> "Doar decolări"
                     FlightEventType.APPROACH -> "Doar apropieri"
+                    FlightEventType.GO_AROUND -> "Doar ratări aterizare (Go-Around)"
                     FlightEventType.EMERGENCY -> "Doar urgențe (7700/PAN/7600/7500)"
                 }
                 append("  |  Filtru: $tName")
@@ -133,6 +134,7 @@ object PdfExporter {
 
         val landings = events.count { it.type == FlightEventType.LANDING }
         val takeoffs = events.count { it.type == FlightEventType.TAKEOFF }
+        val goArounds = events.count { it.type == FlightEventType.GO_AROUND }
         val emergencies = events.count { it.type == FlightEventType.EMERGENCY }
 
         var pageNumber = 1
@@ -154,7 +156,7 @@ object PdfExporter {
         canvas.drawText(truncate(intervalText, 105), MARGIN_X, y, subtitlePaint)
         y += 15f
         canvas.drawText(
-            "Total rezultate: ${events.size}   •   Aterizări: $landings   •   Decolări: $takeoffs   •   Urgențe: $emergencies",
+            "Total: ${events.size}   •   Aterizări: $landings   •   Decolări: $takeoffs   •   Ratări: $goArounds   •   Urgențe: $emergencies",
             MARGIN_X,
             y,
             summaryPaint
@@ -193,6 +195,7 @@ object PdfExporter {
                     FlightEventType.LANDING -> "Aterizare" to landingPaint
                     FlightEventType.TAKEOFF -> "Decolare" to takeoffPaint
                     FlightEventType.APPROACH -> "Apropiere" to approachPaint
+                    FlightEventType.GO_AROUND -> "Go-Around" to emergencyPaint
                     FlightEventType.EMERGENCY -> {
                         val lbl = if (emCode == "PAN") "PAN-PAN" else "URG $emCode".trim()
                         lbl to emergencyPaint

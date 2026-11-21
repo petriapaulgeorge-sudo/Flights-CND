@@ -4,6 +4,7 @@ enum class FlightEventType {
     LANDING,
     TAKEOFF,
     APPROACH,
+    GO_AROUND,
     EMERGENCY
 }
 
@@ -24,7 +25,9 @@ data class RawAircraft(
     val verticalRateFpm: Int? = null,
     val simulated: Boolean = false,
     val airlineHint: String? = null,
-    val routeHint: String? = null
+    val routeHint: String? = null,
+    val military: Boolean = false,
+    val sourceType: String = ""
 )
 
 data class ActiveAircraft(
@@ -48,7 +51,9 @@ data class ActiveAircraft(
     val trail: List<Pair<Double, Double>>,
     val lastSeenMs: Long,
     val airlineHint: String? = null,
-    val routeHint: String? = null
+    val routeHint: String? = null,
+    val military: Boolean = false,
+    val sourceType: String = ""
 )
 
 data class FlightEvent(
@@ -69,7 +74,9 @@ data class FlightEvent(
     val simulated: Boolean = false,
     val squawk: String? = null,
     val emergencyCode: String? = null,
-    val emergencyLabel: String? = null
+    val emergencyLabel: String? = null,
+    val goAroundSummary: String? = null,
+    val minApproachAltFt: Int? = null
 ) {
     val adsbExchangeUrl: String
         get() = "https://globe.adsbexchange.com/?icao=$hex"
@@ -88,14 +95,28 @@ data class MonitorSettings(
     val notifyLanding: Boolean = true,
     val notifyTakeoff: Boolean = true,
     val notifyApproach: Boolean = false,
+    val notifyGoAround: Boolean = true,
     val notifyEmergency7700: Boolean = true,
     val notifyEmergencyPan: Boolean = true,
     val notifyEmergency7600: Boolean = true,
     val notifyEmergency7500: Boolean = true,
-    val autoStartOnBoot: Boolean = true
+    val autoStartOnBoot: Boolean = true,
+    val flyItalyApiKey: String = DEFAULT_FLYITALY_API_KEY,
+    val notifyDroneDobrogea: Boolean = true,
+    val droneAlertRadiusKm: Int = 10,
+    val dimapApiUrl: String = "https://api.dimap.live/api/polling",
+    val dimapApiKey: String = "",
+    val ukraineAlarmApiKey: String = ""
 ) {
     val anyEmergencyEnabled: Boolean
         get() = notifyEmergency7700 || notifyEmergencyPan || notifyEmergency7600 || notifyEmergency7500
+
+    val hasAnyDroneSourceConfigured: Boolean
+        get() = dimapApiUrl.isNotBlank() || ukraineAlarmApiKey.isNotBlank()
+
+    companion object {
+        const val DEFAULT_FLYITALY_API_KEY = "fia_wv70-aRHvgorZIA3OG7KO_o_LRlCbl2YqnJm6H-IaQ8"
+    }
 }
 
 data class FeedSnapshot(

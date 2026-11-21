@@ -103,6 +103,94 @@ class FlightDetectorTest {
     }
 
     @Test
+    fun detectsGoAroundWithoutFalseTakeoffAndAnalyzesProbableCause() {
+        val detector = FlightDetector()
+        val t0 = 1_700_000_000_000L
+
+        // 1. Coborâre pe finală spre Pista 18 (altitudine 1400 ft -> 420 ft)
+        detector.processSnapshot(
+            listOf(
+                RawAircraft(
+                    hex = "4c7777",
+                    callsign = "WZZ3128",
+                    lat = AirportConfig.LAT + 0.055,
+                    lon = AirportConfig.LON,
+                    altBaroFt = AirportConfig.ELEVATION_FT + 1400,
+                    onGround = false,
+                    gsKt = 148,
+                    trackDeg = 180,
+                    verticalRateFpm = -750
+                )
+            ),
+            t0
+        )
+        detector.processSnapshot(
+            listOf(
+                RawAircraft(
+                    hex = "4c7777",
+                    callsign = "WZZ3128",
+                    lat = AirportConfig.LAT + 0.015,
+                    lon = AirportConfig.LON,
+                    altBaroFt = AirportConfig.ELEVATION_FT + 420,
+                    onGround = false,
+                    gsKt = 138,
+                    trackDeg = 180,
+                    verticalRateFpm = -680
+                )
+            ),
+            t0 + 18_000L
+        )
+
+        // 2. Ratare aterizare (Go-Around): urcă brusc de la 420 ft la 1150 ft cu +1850 fpm
+        val rGa = detector.processSnapshot(
+            listOf(
+                RawAircraft(
+                    hex = "4c7777",
+                    callsign = "WZZ3128",
+                    lat = AirportConfig.LAT - 0.008,
+                    lon = AirportConfig.LON,
+                    altBaroFt = AirportConfig.ELEVATION_FT + 1150,
+                    onGround = false,
+                    gsKt = 168,
+                    trackDeg = 180,
+                    verticalRateFpm = 1850
+                )
+            ),
+            t0 + 36_000L
+        )
+        val goArounds = rGa.events.filter { it.type == FlightEventType.GO_AROUND }
+        val takeoffs = rGa.events.filter { it.type == FlightEventType.TAKEOFF }
+        assertEquals(1, goArounds.size)
+        assertEquals(0, takeoffs.size)
+        assertEquals(420, goArounds.first().minApproachAltFt)
+        assertEquals("go_around", rGa.activeAircraft.first().phase)
+
+        // 3. Verificare corelare cu METAR (vânt din spate + rafale + IFR pe Pista 18)
+        val badMetar = RunwayStatusClient.parseMetar("LRCK 201200Z 36015G28KT 2000 +RA BKN005 08/07 Q1005 NOSIG")
+        val badSummary = RunwayStatusClient.analyzeGoAroundReason(
+            runway = "18",
+            minApproachAltFt = 420,
+            conditions = badMetar,
+            localOperationalState = "Operațională",
+            localRwyccCode = "3 — Mediu"
+        )
+        assertTrue(badSummary.contains("420 ft"))
+        assertTrue(badSummary.contains("vânt din spate"))
+        assertTrue(badSummary.contains("RWYCC 3"))
+
+        // 4. Verificare corelare pe vreme bună (Nivel 1/5)
+        val clearMetar = RunwayStatusClient.parseMetar("LRCK 201200Z 18005KT CAVOK 20/10 Q1018 NOSIG")
+        val okSummary = RunwayStatusClient.analyzeGoAroundReason(
+            runway = "18",
+            minApproachAltFt = 420,
+            conditions = clearMetar,
+            localOperationalState = "Operațională",
+            localRwyccCode = "6 — Uscat"
+        )
+        assertTrue(okSummary.contains("Condiții meteo/pistă bune"))
+    }
+
+    @Test
     fun ignoresCruiseOverflights() {
         val detector = FlightDetector()
         val t0 = 1_700_000_000_000L
@@ -286,6 +374,67 @@ class FlightDetectorTest {
         assertTrue(parsed?.destination?.contains("Constanța") == true)
         assertEquals("Wizz Air", AdsbClient.resolveKnownAirline("WZZ3128"))
         assertTrue(AdsbClient.resolveKnownAirport("LTN").contains("Londra Luton"))
+    }
+
+    @Test
+    fun parsesMlatLastPositionMilitaryAndMergesMultipleNetworks() {
+        val feedA = """
+            {
+              "ac": [
+                {
+                  "hex": "ae1234",
+                  "type": "mlat",
+                  "flight": "RCH842 ",
+                  "dbFlags": 1,
+                  "lastPosition": { "lat": 44.41, "lon": 28.52, "seen_pos": 12.5 },
+                  "alt_baro": 18000
+                }
+              ]
+            }
+        """.trimIndent()
+        val feedB = """
+            {
+              "ac": [
+                {
+                  "hex": "ae1234",
+                  "type": "adsb_icao",
+                  "flight": "RCH842",
+                  "t": "C17",
+                  "r": "07-7175",
+                  "lat": 44.41,
+                  "lon": 28.52,
+                  "gs": 320.0,
+                  "track": 180.0
+                },
+                {
+                  "hex": "4a0101",
+                  "flight": "ROF201",
+                  "lat": 44.37,
+                  "lon": 28.49,
+                  "alt_baro": 3500
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val listA = AdsbClient.parseReadsbV2(feedA)
+        assertEquals(1, listA.size)
+        assertTrue(listA.first().military)
+        assertEquals("mlat", listA.first().sourceType)
+
+        val listB = AdsbClient.parseReadsbV2(feedB)
+        val merged = AdsbClient.mergeAircraftLists(listOf(listA, listB))
+        assertEquals(2, merged.size)
+
+        val rch = merged.first { it.hex == "ae1234" }
+        assertTrue(rch.military)
+        assertEquals("C17", rch.aircraftType)
+        assertEquals("07-7175", rch.registration)
+        assertEquals(18000, rch.altBaroFt)
+        assertEquals(320, rch.gsKt)
+
+        val rof = merged.first { it.hex == "4a0101" }
+        assertTrue(rof.military)
     }
 
     @Test

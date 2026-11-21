@@ -35,7 +35,7 @@ class FlightSimulator {
         val f = fleet[seq % fleet.size]
         val rwy = if (runway == "36") "36" else "18"
         val normalizedKind = when (kind) {
-            "takeoff", "emergency", "emergency_7700", "emergency_pan", "emergency_7600", "emergency_7500" -> kind
+            "takeoff", "go_around", "emergency", "emergency_7700", "emergency_pan", "emergency_7600", "emergency_7500" -> kind
             else -> "landing"
         }
         val route = if (normalizedKind == "takeoff") f[4].split(" → ").reversed().joinToString(" → ") else f[4]
@@ -92,6 +92,40 @@ class FlightSimulator {
                         gsKt = 245,
                         trackDeg = 136,
                         verticalRateFpm = -1650,
+                        simulated = true,
+                        airlineHint = s.airline,
+                        routeHint = s.route
+                    )
+                }
+                "go_around" -> {
+                    // Coborâre pe finală până la ~320 ft (p < 0.50), apoi ratare și urcare bruscă (+1850 fpm)
+                    val climbingOut = p >= 0.50
+                    val distKm = if (!climbingOut) {
+                        9.5 * (1.0 - p / 0.50) + 0.8
+                    } else {
+                        0.8 - ((p - 0.50) / 0.50) * 8.5
+                    }
+                    val altAgl = if (!climbingOut) {
+                        (1950.0 - (p / 0.50) * 1630.0).roundToInt()
+                    } else {
+                        (320.0 + ((p - 0.50) / 0.50) * 2800.0).roundToInt()
+                    }
+                    val gs = if (!climbingOut) 142 else 172
+                    val vr = if (!climbingOut) -750 else 1850
+                    RawAircraft(
+                        hex = s.hex,
+                        callsign = s.callsign,
+                        registration = s.registration,
+                        aircraftType = s.aircraftType,
+                        squawk = "2412",
+                        lat = AirportConfig.LAT - dirSign * (distKm / 111.1),
+                        lon = AirportConfig.LON + if (climbingOut) ((p - 0.50) * 0.015) else 0.0,
+                        altBaroFt = AirportConfig.ELEVATION_FT + altAgl,
+                        altGeomFt = AirportConfig.ELEVATION_FT + altAgl,
+                        onGround = false,
+                        gsKt = gs,
+                        trackDeg = track,
+                        verticalRateFpm = vr,
                         simulated = true,
                         airlineHint = s.airline,
                         routeHint = s.route

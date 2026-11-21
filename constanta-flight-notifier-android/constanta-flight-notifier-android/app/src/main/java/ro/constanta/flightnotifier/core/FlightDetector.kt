@@ -41,6 +41,8 @@ class FlightDetector {
         var simulated: Boolean,
         var airlineHint: String?,
         var routeHint: String?,
+        var military: Boolean,
+        var sourceType: String,
         var lastSeenMs: Long,
         var latest: Sample
     ) {
@@ -49,6 +51,8 @@ class FlightDetector {
         var approachingAirport: Boolean = false
         var cndRelated: Boolean = false
         var maxAltAglFt: Int = latest.altAglFt ?: 0
+        var minApproachAltAglFt: Int? = null
+        var minApproachDistKm: Double? = null
         var phase: String = "tracking"
         val history: MutableList<Sample> = mutableListOf()
     }
@@ -98,6 +102,8 @@ class FlightDetector {
                     simulated = raw.simulated,
                     airlineHint = raw.airlineHint,
                     routeHint = raw.routeHint,
+                    military = raw.military,
+                    sourceType = raw.sourceType,
                     lastSeenMs = nowMs,
                     latest = sample
                 ).also { tracks[hex] = it }
@@ -110,6 +116,8 @@ class FlightDetector {
                 if (raw.simulated) existing.simulated = true
                 if (raw.airlineHint != null) existing.airlineHint = raw.airlineHint
                 if (raw.routeHint != null) existing.routeHint = raw.routeHint
+                if (raw.military) existing.military = true
+                if (raw.sourceType.isNotEmpty()) existing.sourceType = raw.sourceType
                 existing.lastSeenMs = nowMs
                 existing
             }
@@ -163,6 +171,7 @@ class FlightDetector {
 
             val lateTakeoff = !track.everOnGroundAtAirport &&
                 !track.approachingAirport &&
+                track.phase != "go_around" &&
                 track.history.size >= 2 &&
                 startedLowNear &&
                 airborneEnough &&
@@ -182,11 +191,13 @@ class FlightDetector {
                     track.cndRelated = true
                     track.everOnGroundAtAirport = false
                     track.approachingAirport = false
+                    track.minApproachAltAglFt = null
+                    track.minApproachDistKm = null
                     emitted.add(it)
                 }
             }
 
-            // 2. APROPIERE & ATERIZARE (APPROACH / LANDING)
+            // 2. APROPIERE, ATERIZARE & RATARE ATERIZARE (APPROACH / LANDING / GO-AROUND)
             val headingInward = isHeadingToward(raw.lat, raw.lon, raw.trackDeg)
             val movingCloser = distDelta != null && distDelta < -0.15
             val notClimbing = !isClimbing &&
@@ -205,6 +216,14 @@ class FlightDetector {
                 track.approachingAirport = true
                 track.cndRelated = true
                 track.phase = "approaching"
+                val curMinAlt = track.minApproachAltAglFt
+                if (curMinAlt == null || altAglFt < curMinAlt) {
+                    track.minApproachAltAglFt = altAglFt
+                }
+                val curMinDist = track.minApproachDistKm
+                if (curMinDist == null || distKm < curMinDist) {
+                    track.minApproachDistKm = distKm
+                }
 
                 if (
                     distKm <= AirportConfig.APPROACH_ALERT_DIST_KM &&
@@ -215,6 +234,40 @@ class FlightDetector {
                     emitEvent(FlightEventType.APPROACH, track, nowMs, "final_approach")?.let {
                         emitted.add(it)
                     }
+                }
+            }
+
+            // 2b. RATARE ATERIZARE (GO-AROUND / MISSED APPROACH)
+            val minAppAlt = track.minApproachAltAglFt
+            val minAppDist = track.minApproachDistKm
+            val strongClimbOut = (raw.verticalRateFpm != null && raw.verticalRateFpm >= AirportConfig.GO_AROUND_MIN_CLIMB_RATE_FPM) ||
+                (altDelta != null && altDelta >= 300)
+            val isGoAround = track.approachingAirport &&
+                !onGround &&
+                !track.everOnGroundAtAirport &&
+                minAppAlt != null &&
+                minAppAlt <= AirportConfig.GO_AROUND_MAX_MIN_ALT_FT &&
+                minAppDist != null &&
+                minAppDist <= AirportConfig.GO_AROUND_MAX_APPROACH_DIST_KM &&
+                distKm <= AirportConfig.GO_AROUND_MAX_DIST_KM &&
+                altAglFt != null &&
+                altAglFt >= minAppAlt + AirportConfig.GO_AROUND_MIN_ALT_GAIN_FT &&
+                strongClimbOut
+
+            if (isGoAround) {
+                emitEvent(
+                    FlightEventType.GO_AROUND,
+                    track,
+                    nowMs,
+                    "missed_approach_climbout",
+                    minApproachAltFt = minAppAlt
+                )?.let {
+                    track.phase = "go_around"
+                    track.cndRelated = true
+                    track.approachingAirport = false
+                    track.minApproachAltAglFt = null
+                    track.minApproachDistKm = null
+                    emitted.add(it)
                 }
             }
 
@@ -230,6 +283,8 @@ class FlightDetector {
                     track.approachingAirport = false
                     track.everAirborneNearAirport = false
                     track.everOnGroundAtAirport = true
+                    track.minApproachAltAglFt = null
+                    track.minApproachDistKm = null
                     emitted.add(it)
                 }
             }
@@ -250,7 +305,7 @@ class FlightDetector {
                 track.phase = if (emInfo.code == "PAN") "emergency_pan" else "emergency"
             } else if (onGround && distKm <= AirportConfig.AIRPORT_ZONE_KM) {
                 if (track.phase != "landed") track.phase = "ground"
-            } else if (track.phase != "departing" && track.phase != "approaching") {
+            } else if (track.phase != "departing" && track.phase != "approaching" && track.phase != "go_around") {
                 track.phase = if (altAglFt != null && altAglFt > 10_000) "overflight" else "airborne"
             }
         }
@@ -311,7 +366,9 @@ class FlightDetector {
                     trail = t.history.map { it.lat to it.lon },
                     lastSeenMs = t.lastSeenMs,
                     airlineHint = t.airlineHint,
-                    routeHint = t.routeHint
+                    routeHint = t.routeHint,
+                    military = t.military,
+                    sourceType = t.sourceType
                 )
             }
             .sortedBy { it.distKm }
@@ -324,7 +381,8 @@ class FlightDetector {
         track: TrackState,
         nowMs: Long,
         reason: String,
-        emergencyInfo: EmergencyInfo? = null
+        emergencyInfo: EmergencyInfo? = null,
+        minApproachAltFt: Int? = null
     ): FlightEvent? {
         val key = if (type == FlightEventType.EMERGENCY) {
             "${track.hex}:EMERGENCY:${emergencyInfo?.code ?: track.squawk}"
@@ -338,6 +396,10 @@ class FlightDetector {
         if (type == FlightEventType.LANDING) {
             val lastTakeoff = cooldowns["${track.hex}:${FlightEventType.TAKEOFF.name}"]
             if (lastTakeoff != null && nowMs - lastTakeoff < 120_000L) return null
+        }
+        if (type == FlightEventType.TAKEOFF) {
+            val lastGoAround = cooldowns["${track.hex}:${FlightEventType.GO_AROUND.name}"]
+            if (lastGoAround != null && nowMs - lastGoAround < 300_000L) return null
         }
 
         cooldowns[key] = nowMs
@@ -361,7 +423,8 @@ class FlightDetector {
             simulated = track.simulated,
             squawk = track.squawk.ifEmpty { null },
             emergencyCode = emergencyInfo?.code,
-            emergencyLabel = emergencyInfo?.description
+            emergencyLabel = emergencyInfo?.description,
+            minApproachAltFt = minApproachAltFt
         )
     }
 
